@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-05T14:21:50Z",
+  "title": "Design System: Freewrite",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "primary", "displayName": "Soft Off-Black", "canonical": "#333333", "tonalRamp": ["#1a1a1a", "#242424", "#2e2e2e", "#333333", "#4d4d4d", "#666666", "#808080", "#999999"] },
+      "ink-soft": { "role": "neutral", "displayName": "Soft Off-White", "canonical": "#E6E6E6", "tonalRamp": ["#4d4d4d", "#6b6b6b", "#8a8a8a", "#a8a8a8", "#c7c7c7", "#d6d6d6", "#e6e6e6", "#f2f2f2"] },
+      "ink-muted": { "role": "neutral", "displayName": "Muted Gray", "canonical": "#808080", "tonalRamp": ["#404040", "#555555", "#6a6a6a", "#808080", "#959595", "#aaaaaa", "#bfbfbf", "#d4d4d4"] },
+      "paper": { "role": "neutral", "displayName": "Paper White", "canonical": "#FFFFFF", "tonalRamp": ["#666666", "#8a8a8a", "#adadad", "#d1d1d1", "#e6e6e6", "#f2f2f2", "#fafafa", "#ffffff"] },
+      "night": { "role": "neutral", "displayName": "Night", "canonical": "#000000", "tonalRamp": ["#000000", "#1a1a1a", "#333333", "#4d4d4d", "#666666", "#808080", "#999999", "#b3b3b3"] },
+      "row-selected": { "role": "neutral", "displayName": "Row Selected", "canonical": "rgba(128,128,128,0.10)", "tonalRamp": ["#e0e0e0", "#d9d9d9", "#d2d2d2", "#cccccc", "#c5c5c5", "#bfbfbf", "#b8b8b8", "#b2b2b2"] },
+      "row-hover": { "role": "neutral", "displayName": "Row Hover", "canonical": "rgba(128,128,128,0.05)", "tonalRamp": ["#efefef", "#ececec", "#e9e9e9", "#e6e6e6", "#e3e3e3", "#e0e0e0", "#dddddd", "#dadada"] },
+      "placeholder": { "role": "neutral", "displayName": "Placeholder Gray", "canonical": "rgba(128,128,128,0.50)", "tonalRamp": ["#bfbfbf", "#c7c7c7", "#cfcfcf", "#d7d7d7", "#dfdfdf", "#e7e7e7", "#efefef", "#f7f7f7"] }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Body", "purpose": "The writing surface. 18px default, 16-26px adjustable, 1.5x line height, 650px measure." },
+      "label": { "displayName": "Label", "purpose": "Navigation controls and entry previews (13px)." },
+      "label-small": { "displayName": "Label Small", "purpose": "Entry dates and secondary metadata (12px)." }
+    },
+    "shadows": [
+      { "name": "menu-float", "value": "rgba(0,0,0,0.10) 0px 2px 4px", "purpose": "The single shadow in the system; reserved for floating popovers only." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "ease-in-out 0.2s", "purpose": "Default for state transitions (nav fade, sidebar slide, hover)." },
+      { "name": "ease-reveal", "value": "ease-in 1.0s", "purpose": "Slow fade-out of the nav during timed focus sessions." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Navigation Button",
+      "kind": "button",
+      "refersTo": "nav-button",
+      "description": "Quiet text button in the bottom nav; gray at rest, darkens on hover.",
+      "html": "<button class=\"ds-nav\">15:00</button>",
+      "css": ".ds-nav { background: transparent; border: none; color: #808080; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; padding: 8px; border-radius: 8px; cursor: pointer; transition: color 0.2s ease-in-out; } .ds-nav:hover { color: #333333; }"
+    },
+    {
+      "name": "Sidebar Row (rest)",
+      "kind": "nav",
+      "refersTo": "sidebar-row",
+      "description": "History entry row at rest; no fill, 4px radius.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-row-preview\">This is my first entry...</span><span class=\"ds-row-date\">Aug 4</span></div>",
+      "css": ".ds-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 40px; padding: 8px 16px; border-radius: 4px; cursor: pointer; } .ds-row-preview { color: #333333; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-row-date { color: #808080; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; } .ds-row:hover { background: rgba(128,128,128,0.05); }"
+    },
+    {
+      "name": "Sidebar Row (selected)",
+      "kind": "nav",
+      "refersTo": "sidebar-row-selected",
+      "description": "History row when the entry is active; whisper-gray fill.",
+      "html": "<div class=\"ds-row ds-row-selected\"><span class=\"ds-row-preview\">Today's thoughts</span><span class=\"ds-row-date\">Aug 5</span></div>",
+      "css": ".ds-row-selected { background: rgba(128,128,128,0.10); } .ds-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 40px; padding: 8px 16px; border-radius: 4px; } .ds-row-preview { color: #333333; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-row-date { color: #808080; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; }"
+    },
+    {
+      "name": "Editor Placeholder",
+      "kind": "custom",
+      "refersTo": "editor",
+      "description": "Empty writing surface showing a faint placeholder hint.",
+      "html": "<div class=\"ds-editor\"><span class=\"ds-ph\">Begin writing</span></div>",
+      "css": ".ds-editor { background: #ffffff; width: 650px; padding-top: 40px; } .ds-ph { color: rgba(128,128,128,0.50); font-family: Lato, -apple-system, sans-serif; font-size: 18px; line-height: 1.5; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Page",
+    "overview": "Freewrite's visual system is built to vanish. The product is a distraction-free writing environment — the point is that nothing on screen competes with the words (or the video) being captured. The interface reads as a nearly empty page: white in light mode, black in dark mode, with typography and whitespace carrying all the identity. There is no accent color; there is no decorative chrome; there is no competing structure. Calm, minimal, and human — the design whispers so the writing can speak. Density is deliberately low. The editor is capped at a comfortable measure (650px) so long-form thought never feels crowded. The bottom navigation is a quiet strip of gray text that darkens on hover and recedes entirely during focused timed sessions. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page. This system explicitly rejects the cluttered Notion-style tool and the generic Notes.app. It is a friend's quiet desk, not a control room.",
+    "keyCharacteristics": [
+      "Ink-only. No color beyond black/white/gray; identity lives in typography and whitespace.",
+      "Flat by default; depth reserved for floating menus only.",
+      "Human-calm microcopy and a sparse, unpressured layout.",
+      "Native macOS restraint — it should feel at home on the platform, never like a ported web UI.",
+      "The interface's highest goal is to disappear during writing."
+    ],
+    "rules": [
+      { "name": "The One Ink Rule", "body": "There is exactly one ink family. Any color that isn't black, white, gray, or a transparency of those is forbidden.", "section": "colors" },
+      { "name": "The One Voice Rule", "body": "Every font is an option the writer chooses for their own words (Lato, Arial, System, Serif, or random). The system chrome itself always speaks in the native system sans — the tool's voice stays distinct from the writer's.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. Shadows appear only to lift a floating menu off the page — never as card decoration, never on the writing surface itself.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the writing surface utterly bare — no borders, frames, shadows, or background tint on the editor.",
+      "Do use the soft ink values (#333333 light / #E6E6E6 dark) for body text over the muted gray; never read near-ink against a tinted background.",
+      "Do reserve the single Menu Float shadow for popovers only.",
+      "Do keep selection and hover states whisper-subtle (gray at 10% / 5%).",
+      "Do protect the 650px measure and 1.5× line height for long-session comfort.",
+      "Do let the interface recede during timed writing — hiding the nav is a feature, not a bug."
+    ],
+    "donts": [
+      "Don't introduce any accent or brand color — this is strictly monochrome (ink-only).",
+      "Don't build a cluttered Notion-style tool — no dense panels, nested database chrome, or feature-soup navigation.",
+      "Don't ship generic Notes.app blandness — every detail must feel considered, not default.",
+      "Don't go dark \"developer-tool\" — no terminal green/amber, no neon, no glassmorphism.",
+      "Don't add card shadows, gradient text, side-stripe colored borders, or oversized radii (≥16px) anywhere.",
+      "Don't gate content visibility behind a hover or reveal state — what matters must be visible by default."
+    ]
+  }
+}
