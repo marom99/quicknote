@@ -988,3 +988,32 @@ When making changes, always:
 - Check for collection mutation crashes
 - Verify files are created in correct location
 - Ensure privacy permissions are properly configured
+
+## Design Context
+
+Design direction is captured in `PRODUCT.md`, `DESIGN.md`, and `.impeccable.md`. The visual system ("The Quiet Page") is **strictly monochrome, ink-only** — identity lives in typography and whitespace, never in accent color.
+
+### Users
+Distraction-free writers and journalers who want to capture thoughts the moment they happen, without ceremony. They free-write, record short video thoughts, and revisit entries later — often in quiet or late-night moments, in flow. The tool should stay out of the way so the thinking stays theirs.
+
+### Brand Personality
+Fast, light, frictionless. Calm, minimal, human. The voice is a friend, not a tool or a therapist — warm, direct, slightly casual, never clinical, never corporate. The interface is quiet and nearly invisible so the writing is the only thing on screen.
+
+### Aesthetic Direction
+Minimal and calm by default — the UI's job is to disappear during timed writing sessions, leaving only the text (or video). No dense panels, no feature-soup chrome, nothing that reads as default/stock.
+- Theme: both light and dark, user-switchable and persisted; neither is the "default default."
+- Anti-references: not a cluttered Notion-style tool; not generic Notes.app; not a slick dark developer tool.
+- Native SwiftUI/macOS app — design must feel at home on the platform, not like a ported web UI.
+
+### Design Principles
+- **Get out of the way.** The interface's job is to disappear. Most UI hides during timed sessions; the text (or video) is the whole point.
+- **Practice what you preach.** The app itself should feel as frictionless as the writing it enables — no dialogs, no setup, auto-everything.
+- **Start instantly.** Open the app and you're already writing today's entry; no blank "new document" gate.
+- **Human over clinical.** Tone and detail should read as a friend's helping hand — comfort, validation, warmth — not a sterile product.
+- **Local-first ownership.** Every thought lives in a plain file the user can open; transparency and control over cleverness.
+
+### Visual Guardrails (from DESIGN.md)
+- **The One Ink Rule.** No accent or brand color, ever — strictly black / white / gray / their transparencies.
+- **The Flat-By-Default Rule.** Flat surfaces; one whisper shadow (`rgba(0,0,0,0.10)` @ 4px) reserved for floating popovers only.
+- **The One Voice Rule.** System chrome always speaks in the native system sans; the writer's words may use Lato / Arial / System / Serif / random.
+- Body ink: `#333333` (light) / `#E6E6E6` (dark). Selection/hover fills: gray at 10% / 5%. Editor measure 650px, 1.5× line height.
