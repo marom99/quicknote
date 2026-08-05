@@ -1,0 +1,56 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Freewrite is a native macOS SwiftUI app (Xcode/Swift, no package manager).
+# Entries live in ~/Documents/Freewrite/ and preferences use
+# app.humansongs.freewrite UserDefaults, so only one launched app at a time.
+
+[scripts]
+setup = """
+set -euo pipefail
+if [ "${CONDUCTOR_IS_LOCAL:-1}" != "1" ]; then
+  echo "Skipping freewrite setup (requires local Xcode on macOS)."
+  exit 0
+fi
+command -v xcodebuild >/dev/null
+xcodebuild -version
+xcodebuild -list -project freewrite.xcodeproj
+"""
+run_mode = "nonconcurrent"
+archive = """
+set -euo pipefail
+DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
+APP_BIN="$DERIVED_DATA/Build/Products/Debug/freewrite.app/Contents/MacOS/freewrite"
+if [ -x "$APP_BIN" ]; then
+  pkill -f "$APP_BIN" 2>/dev/null || true
+fi
+rm -rf "$DERIVED_DATA"
+"""
+
+[scripts.run.app]
+command = """
+set -euo pipefail
+DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
+xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" build
+exec "$DERIVED_DATA/Build/Products/Debug/freewrite.app/Contents/MacOS/freewrite"
+"""
+default = true
+icon = "play"
+available_in = ["local"]
+
+[scripts.run.build]
+command = """
+set -euo pipefail
+DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
+xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" build
+"""
+icon = "hammer"
+available_in = ["local"]
+
+[scripts.run.test]
+command = """
+set -euo pipefail
+DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
+xcodebuild -project freewrite.xcodeproj -scheme freewrite -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" test -only-testing:freewriteTests
+"""
+icon = "test-tube"
+available_in = ["local"]
