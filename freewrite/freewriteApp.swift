@@ -192,8 +192,9 @@ struct freewriteApp: App {
                 .preferredColorScheme(colorSchemeString == "dark" ? .dark : .light)
         }
         // Native macOS title bar (traffic lights + centered window title)
-        .defaultSize(width: 1100, height: 600)
-        .windowResizability(.contentSize)
+        // Default is a comfortable note size; min allows Age-like compact windows.
+        .defaultSize(width: 360, height: 540)
+        .windowResizability(.contentMinSize)
     }
 }
 
