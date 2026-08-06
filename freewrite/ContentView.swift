@@ -44,29 +44,6 @@ struct HumanEntry: Identifiable {
             videoFilename: nil
         )
     }
-
-    static func createVideoEntry() -> HumanEntry {
-        let id = UUID()
-        let now = Date()
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        let dateString = dateFormatter.string(from: now)
-
-        // For display
-        dateFormatter.dateFormat = "MMM d"
-        let displayDate = dateFormatter.string(from: now)
-
-        let videoFilename = "[\(id)]-[\(dateString)].mov"
-
-        return HumanEntry(
-            id: id,
-            date: displayDate,
-            filename: "[\(id)]-[\(dateString)].md",
-            previewText: "Video Entry",
-            entryType: .video,
-            videoFilename: videoFilename
-        )
-    }
 }
 
 struct HeartEmoji: Identifiable {
@@ -76,13 +53,6 @@ struct HeartEmoji: Identifiable {
 }
 
 struct ContentView: View {
-    private struct VideoPermissionPopoverItem: Identifiable {
-        let id = UUID()
-        let message: String
-        let buttonLabel: String
-        let settingsPane: String
-    }
-
     @State private var entries: [HumanEntry] = []
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
     
@@ -109,14 +79,7 @@ struct ContentView: View {
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
     @State private var selectedVideoHasTranscript = false
-    @State private var showingVideoRecording = false // Add state for video recording view
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
-    @State private var isPreparingVideoRecording = false
-    @State private var preparedCameraManager: CameraManager? = nil
-    @State private var videoRecordingPreparationID: UUID? = nil
-    @State private var showingVideoPermissionPopover = false
-    @State private var videoPermissionPopoverItems: [VideoPermissionPopoverItem] = []
-    @State private var videoPermissionPopoverFallbackMessage: String? = nil
     let entryHeight: CGFloat = 40
     
     let placeholderOptions = [
@@ -624,152 +587,6 @@ struct ContentView: View {
         }
     }
     
-    private func startVideoRecordingPreflight() {
-        guard !isPreparingVideoRecording, !showingVideoRecording else {
-            return
-        }
-
-        showingVideoPermissionPopover = false
-        videoPermissionPopoverItems = []
-        videoPermissionPopoverFallbackMessage = nil
-
-        let preparationID = UUID()
-        let manager = CameraManager()
-
-        videoRecordingPreparationID = preparationID
-        preparedCameraManager = manager
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            isPreparingVideoRecording = true
-        }
-
-        manager.onReadyToRecord = { [weak manager] in
-            guard let manager else { return }
-            DispatchQueue.main.async {
-                finishVideoRecordingPreflight(
-                    preparationID: preparationID,
-                    manager: manager,
-                    presentationDelay: 0.5
-                )
-            }
-        }
-
-        manager.onCannotRecord = { [weak manager] in
-            guard let manager else { return }
-            DispatchQueue.main.async {
-                guard self.videoRecordingPreparationID == preparationID else {
-                    return
-                }
-                let payload = self.videoPermissionPopoverPayload(
-                    cameraGranted: manager.permissionGranted,
-                    microphoneGranted: manager.microphonePermissionGranted,
-                    speechGranted: manager.speechPermissionGranted
-                )
-                self.videoPermissionPopoverItems = payload.items
-                self.videoPermissionPopoverFallbackMessage = payload.fallbackMessage
-                self.showingVideoPermissionPopover = true
-                self.clearVideoRecordingPreparationState()
-            }
-        }
-
-        manager.checkPermissions()
-    }
-
-    private func finishVideoRecordingPreflight(
-        preparationID: UUID,
-        manager: CameraManager,
-        presentationDelay: TimeInterval = 0
-    ) {
-        let presentRecorder = {
-            guard videoRecordingPreparationID == preparationID else {
-                return
-            }
-
-            videoRecordingPreparationID = nil
-            manager.onReadyToRecord = nil
-            manager.onCannotRecord = nil
-            preparedCameraManager = manager
-
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isPreparingVideoRecording = false
-                showingVideoRecording = true
-            }
-        }
-
-        if presentationDelay > 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + presentationDelay) {
-                presentRecorder()
-            }
-        } else {
-            presentRecorder()
-        }
-    }
-
-    private func clearVideoRecordingPreparationState() {
-        preparedCameraManager?.onReadyToRecord = nil
-        preparedCameraManager?.onCannotRecord = nil
-        videoRecordingPreparationID = nil
-        isPreparingVideoRecording = false
-        preparedCameraManager = nil
-    }
-
-    private func videoPermissionPopoverPayload(
-        cameraGranted: Bool,
-        microphoneGranted: Bool,
-        speechGranted: Bool
-    ) -> (items: [VideoPermissionPopoverItem], fallbackMessage: String?) {
-        var items: [VideoPermissionPopoverItem] = []
-        if !cameraGranted {
-            items.append(
-                VideoPermissionPopoverItem(
-                    message: "Hey, we need camera permission.",
-                    buttonLabel: "Open Camera Settings",
-                    settingsPane: "Privacy_Camera"
-                )
-            )
-        }
-        if !microphoneGranted {
-            items.append(
-                VideoPermissionPopoverItem(
-                    message: "Hey, we need microphone permission.",
-                    buttonLabel: "Open Microphone Settings",
-                    settingsPane: "Privacy_Microphone"
-                )
-            )
-        }
-        if !speechGranted {
-            items.append(
-                VideoPermissionPopoverItem(
-                    message: "Hey, we need speech recognition permission.",
-                    buttonLabel: "Open Speech Settings",
-                    settingsPane: "Privacy_SpeechRecognition"
-                )
-            )
-        }
-
-        if items.isEmpty {
-            return (
-                items: [],
-                fallbackMessage: "Could not prepare camera right now. Please try again."
-            )
-        }
-
-        return (
-            items: items,
-            fallbackMessage: nil
-        )
-    }
-
-    private func openVideoPermissionSettings(_ settingsPane: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(settingsPane)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
     var lineHeight: CGFloat {
         let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
         let defaultLineHeight = getLineHeight(font: font)
@@ -794,7 +611,7 @@ struct ContentView: View {
                 if let videoURL = currentVideoURL {
                     VideoPlayerView(
                         videoURL: videoURL,
-                        isPlaybackSuspended: isPreparingVideoRecording || showingVideoRecording
+                        isPlaybackSuspended: false
                     )
                         .id(videoURL.path)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1133,34 +950,12 @@ struct ContentView: View {
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
             }
         }
-        .overlay {
-            if showingVideoRecording {
-                VideoRecordingView(
-                    isPresented: $showingVideoRecording,
-                    cameraManager: preparedCameraManager
-                ) { videoURL, transcript in
-                    // Save the video and create entry
-                    saveVideoEntry(from: videoURL, transcript: transcript)
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        showingVideoRecording = false
-                    }
-                }
-                .zIndex(10)
-            }
-        }
         .frame(minWidth: 1100, minHeight: 600)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             loadExistingEntries()
-        }
-        .onChange(of: showingVideoRecording) { _, isShowing in
-            if !isShowing {
-                clearVideoRecordingPreparationState()
-            }
         }
         .onChange(of: text) { _ in
             // Save current entry when text changes
@@ -1295,115 +1090,6 @@ struct ContentView: View {
         }
     }
     
-    private func saveVideoEntry(from tempURL: URL, transcript: String?) {
-        let replacementEntry = selectedEntryId
-            .flatMap { id in entries.first(where: { $0.id == id }) }
-            .flatMap { entry -> HumanEntry? in
-                guard entry.entryType == .text else { return nil }
-                guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-                return entry
-            }
-
-        let videoEntry: HumanEntry
-        if let replacementEntry {
-            let videoFilename = replacementEntry.filename.replacingOccurrences(of: ".md", with: ".mov")
-            videoEntry = HumanEntry(
-                id: replacementEntry.id,
-                date: replacementEntry.date,
-                filename: replacementEntry.filename,
-                previewText: previewTextFromTranscript(transcript),
-                entryType: .video,
-                videoFilename: videoFilename
-            )
-        } else {
-            let newEntry = HumanEntry.createVideoEntry()
-            videoEntry = HumanEntry(
-                id: newEntry.id,
-                date: newEntry.date,
-                filename: newEntry.filename,
-                previewText: previewTextFromTranscript(transcript),
-                entryType: .video,
-                videoFilename: newEntry.videoFilename
-            )
-        }
-
-        // Get the documents directory
-        let documentsDirectory = getDocumentsDirectory()
-
-        // Save the video file
-        if let videoFilename = videoEntry.videoFilename {
-            do {
-                let videoEntryDirectory = try ensureVideoEntryDirectoryExists(for: videoFilename)
-                let videoDestURL = videoEntryDirectory.appendingPathComponent(videoFilename)
-                let transcriptURL = videoEntryDirectory.appendingPathComponent("transcript.md")
-                let cleanedTranscript = transcript?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                // Copy the video file from temp location to documents directory
-                if fileManager.fileExists(atPath: videoDestURL.path) {
-                    try fileManager.removeItem(at: videoDestURL)
-                }
-                try fileManager.copyItem(at: tempURL, to: videoDestURL)
-                print("Successfully saved video: \(videoFilename)")
-
-                if let thumbnailImage = generateVideoThumbnail(from: videoDestURL) {
-                    persistThumbnail(thumbnailImage, for: videoFilename)
-                    print("Successfully saved thumbnail for video: \(videoFilename)")
-                } else {
-                    print("Could not generate thumbnail for video: \(videoFilename)")
-                }
-
-                // Create the metadata file
-                let metadataURL = documentsDirectory.appendingPathComponent(videoEntry.filename)
-                let metadataContent = "Video Entry"
-                try metadataContent.write(to: metadataURL, atomically: true, encoding: .utf8)
-
-                if let cleanedTranscript, !cleanedTranscript.isEmpty {
-                    try cleanedTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
-                    print("Successfully saved transcript for video: \(videoFilename)")
-                } else if fileManager.fileExists(atPath: transcriptURL.path) {
-                    try fileManager.removeItem(at: transcriptURL)
-                }
-
-                let selectNewVideoEntry = {
-                    if let existingIndex = self.entries.firstIndex(where: { $0.id == videoEntry.id }) {
-                        self.entries[existingIndex] = videoEntry
-                    } else {
-                        self.entries.insert(videoEntry, at: 0)
-                    }
-                    self.entries.sort { self.isEntryNewer($0, than: $1) }
-                    guard let insertedEntry = self.entries.first(where: { $0.id == videoEntry.id }) else {
-                        print("Could not find saved video entry in entries array")
-                        return
-                    }
-                    self.selectedEntryId = insertedEntry.id
-                    self.currentVideoURL = videoDestURL
-                    self.text = ""
-                    self.didCopyTranscript = false
-                    self.selectedVideoHasTranscript = (cleanedTranscript?.isEmpty == false)
-                    print("Successfully loaded new video entry: \(videoFilename)")
-                    self.historyDebug("VIDEO SAVE selected \(self.debugEntrySummary(insertedEntry)) videoPath=\(videoDestURL.path)")
-                    self.logEntriesOrder("saveVideoEntry")
-                }
-                
-                if Thread.isMainThread {
-                    selectNewVideoEntry()
-                } else {
-                    DispatchQueue.main.async {
-                        selectNewVideoEntry()
-                    }
-                }
-
-                if replacementEntry != nil {
-                    print("Successfully replaced empty text entry with video entry")
-                } else {
-                    print("Successfully created video entry")
-                }
-            } catch {
-                print("Error saving video entry: \(error)")
-            }
-        }
-    }
-
     private func deleteEntry(entry: HumanEntry) {
         // Delete the file from the filesystem
         let documentsDirectory = getDocumentsDirectory()
