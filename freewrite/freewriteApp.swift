@@ -11,10 +11,26 @@ import AppKit
 /// Keeps native traffic lights + title, but forces a solid title bar that
 /// always matches the note background (macOS likes to reset this on focus).
 enum WindowChrome {
+    private final class WindowState {
+        var title: String = "Untitled"
+        var isDark: Bool = false
+    }
+
     private static var observations: [NSObjectProtocol] = []
-    private static var title: String = "Untitled"
-    private static var isDark: Bool = false
+    private static var states = NSMapTable<NSWindow, WindowState>(
+        keyOptions: .weakMemory,
+        valueOptions: .strongMemory
+    )
     private static var started = false
+
+    private static func state(for window: NSWindow) -> WindowState {
+        if let existing = states.object(forKey: window) {
+            return existing
+        }
+        let newState = WindowState()
+        states.setObject(newState, forKey: window)
+        return newState
+    }
 
     static func startObserving() {
         guard !started else { return }
@@ -44,17 +60,17 @@ enum WindowChrome {
         }
     }
 
-    /// Called from SwiftUI when the entry title or theme changes.
-    static func update(title: String, isDark: Bool) {
-        let themeChanged = self.isDark != isDark
-        self.title = title
-        self.isDark = isDark
+    /// Called from SwiftUI when the entry title or theme changes for a specific window.
+    static func update(for window: NSWindow, title: String, isDark: Bool) {
+        guard shouldStyle(window) else { return }
+        let state = state(for: window)
+        let themeChanged = state.isDark != isDark
+        state.title = title
+        state.isDark = isDark
 
-        for window in NSApplication.shared.windows where shouldStyle(window) {
-            window.title = title
-            if themeChanged {
-                apply(to: window)
-            }
+        window.title = title
+        if themeChanged {
+            apply(to: window)
         }
     }
 
@@ -66,14 +82,15 @@ enum WindowChrome {
 
     static func apply(to window: NSWindow) {
         guard shouldStyle(window) else { return }
+        let state = state(for: window)
 
-        window.title = title
+        window.title = state.title
         window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
         window.isOpaque = true
-        window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-        window.backgroundColor = isDark ? .black : .white
+        window.appearance = NSAppearance(named: state.isDark ? .darkAqua : .aqua)
+        window.backgroundColor = state.isDark ? .black : .white
 
         if #available(macOS 11.0, *) {
             window.titlebarSeparatorStyle = .none
@@ -87,7 +104,7 @@ enum WindowChrome {
         DispatchQueue.main.async {
             guard shouldStyle(window) else { return }
             window.titlebarAppearsTransparent = true
-            window.backgroundColor = isDark ? .black : .white
+            window.backgroundColor = state.isDark ? .black : .white
             if #available(macOS 11.0, *) {
                 window.titlebarSeparatorStyle = .none
             }
@@ -141,9 +158,8 @@ struct WindowTitleAccessor: NSViewRepresentable {
         WindowChrome.startObserving()
         let view = NSView()
         DispatchQueue.main.async {
-            WindowChrome.update(title: title, isDark: isDark)
             if let window = view.window {
-                WindowChrome.apply(to: window)
+                WindowChrome.update(for: window, title: title, isDark: isDark)
             }
         }
         return view
@@ -151,10 +167,8 @@ struct WindowTitleAccessor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
-            WindowChrome.update(title: title, isDark: isDark)
             if let window = nsView.window {
-                // Title/theme only — full apply is handled by notifications + theme change.
-                window.title = title
+                WindowChrome.update(for: window, title: title, isDark: isDark)
             }
         }
     }
