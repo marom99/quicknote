@@ -972,7 +972,9 @@ struct ContentView: View {
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
             }
         }
-        .frame(minWidth: 280, minHeight: 140)
+        // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
+        // and top padding (40) + bottom nav (68) need leftover vertical room to write.
+        .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))

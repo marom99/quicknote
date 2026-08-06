@@ -793,7 +793,7 @@ func exportEntryAsPDF(entry: HumanEntry) {
 ```
 
 **Title Extraction**:
-- Takes first 4 words of content
+- Takes first 4 words of the first line of content
 - Removes punctuation
 - Falls back to "Entry [date]" if content empty
 
