@@ -1159,9 +1159,9 @@ struct ContentView: View {
             return "Entry \(date)"
         }
         
-        // Split content into words, ignoring newlines and removing punctuation
-        let words = trimmedContent
-            .replacingOccurrences(of: "\n", with: " ")
+        // Split only the first line into words and remove punctuation
+        let firstLine = trimmedContent.components(separatedBy: .newlines).first ?? ""
+        let words = firstLine
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
             .map { word in
