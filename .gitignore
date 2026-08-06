@@ -64,3 +64,14 @@ playground.xcworkspace
 
 # Icon?
 Icon?
+
+# Agent tooling (local)
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.grok/
+.pi/
+.opencode/
+.impeccable/

@@ -593,6 +593,26 @@ struct ContentView: View {
         return (fontSize * 1.5) - defaultLineHeight
     }
 
+    private var currentEntryTitle: String {
+        guard let selectedEntryId,
+              let entry = entries.first(where: { $0.id == selectedEntryId }) else {
+            return "Untitled"
+        }
+
+        if entry.entryType == .video {
+            return entry.previewText.isEmpty ? "Video Entry" : entry.previewText
+        }
+
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedText.isEmpty {
+            return "Untitled"
+        }
+
+        let firstLine = trimmedText.components(separatedBy: .newlines).first ?? trimmedText
+        let cleaned = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Untitled" : cleaned
+    }
+
     
     var body: some View {
         let buttonBackground = colorScheme == .light ? Color.white : Color.black
@@ -645,8 +665,8 @@ struct ContentView: View {
                         }, alignment: .topLeading
                     )
                 }
-                    
-                
+
+                // Bottom nav
                 VStack {
                     Spacer()
                     HStack {
@@ -756,17 +776,17 @@ struct ContentView: View {
                     .padding()
                     .background(Color(colorScheme == .light ? .white : .black))
                     .opacity(bottomNavOpacity)
-                    .onHover { hovering in
-                        isHoveringBottomNav = hovering
-                        if hovering {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                bottomNavOpacity = 1.0
+                        .onHover { hovering in
+                            isHoveringBottomNav = hovering
+                            if hovering {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    bottomNavOpacity = 1.0
+                                }
                             }
                         }
-                    }
                 }
             }
-            
+
             // Right sidebar
             if showingSidebar {
                 Divider()
@@ -953,6 +973,7 @@ struct ContentView: View {
         .frame(minWidth: 1100, minHeight: 600)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
+        .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             loadExistingEntries()
