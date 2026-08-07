@@ -55,7 +55,7 @@ struct ContentView: View {
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
     
     private let selectedFont: String = "Lato-Regular"
-    private let fontSize: CGFloat = 18
+    private let fontSize: CGFloat = 14
     @State private var bottomNavOpacity: Double = 1.0
     @State private var isHoveringBottomNav = false
     @State private var selectedEntryIndex: Int = 0
@@ -606,8 +606,14 @@ struct ContentView: View {
         }
 
         let firstLine = trimmedText.components(separatedBy: .newlines).first ?? trimmedText
-        let cleaned = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "Untitled" : cleaned
+        let words = firstLine
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+        if words.isEmpty {
+            return "Untitled"
+        }
+        let title = words.prefix(4).joined(separator: " ")
+        return words.count > 4 ? "\(title)..." : title
     }
 
     
@@ -636,31 +642,33 @@ struct ContentView: View {
                 } else {
                     // Show text editor for text entries
                     TextEditor(text: $text)
-                    .background(Color(colorScheme == .light ? .white : .black))
-                    .font(.custom(selectedFont, size: fontSize))
-                    .foregroundColor(colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9))
-                    .scrollContentBackground(.hidden)
-                    .scrollIndicators(.never)
-                    .lineSpacing(lineHeight)
-                    .frame(maxWidth: 650)
-                    .padding(.top, 40)
-                    .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
-                    .padding(.bottom, bottomNavOpacity > 0 ? navHeight : 0)
-                    .colorScheme(colorScheme)
-                    .onAppear {
-                        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-                    }
-                    .overlay(
-                        ZStack(alignment: .topLeading) {
+                        .background(Color(colorScheme == .light ? .white : .black))
+                        .font(.custom(selectedFont, size: fontSize))
+                        .foregroundColor(colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9))
+                        .scrollContentBackground(.hidden)
+                        .scrollIndicators(.never)
+                        .lineSpacing(lineHeight)
+                        // Placeholder shares the editor's coordinate space so it sits on the first line.
+                        .overlay(alignment: .topLeading) {
                             if text.isEmpty {
                                 Text(placeholderText)
                                     .font(.custom(selectedFont, size: fontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
+                                    // Match NSTextView's default textContainerInset (5, 0) — no extra top inset.
+                                    .padding(.leading, 5)
                                     .allowsHitTesting(false)
-                                    .offset(x: 5, y: 40)
                             }
-                        }, alignment: .topLeading
-                    )
+                        }
+                        .frame(maxWidth: 650, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.top, 40)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, bottomNavOpacity > 0 ? navHeight : 0)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
+                        .colorScheme(colorScheme)
+                        .onAppear {
+                            placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+                        }
                 }
 
                 // Bottom nav
@@ -941,7 +949,9 @@ struct ContentView: View {
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
             }
         }
-        .frame(minWidth: 1100, minHeight: 600)
+        // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
+        // and top padding (40) + bottom nav (68) need leftover vertical room to write.
+        .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
