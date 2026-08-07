@@ -609,8 +609,14 @@ struct ContentView: View {
         }
 
         let firstLine = trimmedText.components(separatedBy: .newlines).first ?? trimmedText
-        let cleaned = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "Untitled" : cleaned
+        let words = firstLine
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+        if words.isEmpty {
+            return "Untitled"
+        }
+        let title = words.prefix(4).joined(separator: " ")
+        return words.count > 4 ? "\(title)..." : title
     }
 
     
