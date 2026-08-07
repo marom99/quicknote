@@ -16,7 +16,7 @@ typography:
     fontSize: "18px"
     fontWeight: 400
     lineHeight: 1.5
-    maxWidth: "650px"
+    inset: "18px"
   label:
     fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif"
     fontSize: "13px"
@@ -64,7 +64,7 @@ components:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     typography: "{typography.body}"
-    width: "650px"
+    inset: "18px"
 ---
 
 # Design System: Freewrite
@@ -75,7 +75,7 @@ components:
 
 Freewrite's visual system is built to vanish. The product is a distraction-free writing environment — the point is that nothing on screen competes with the words (or the video) being captured. The interface reads as a nearly empty page: white in light mode, black in dark mode, with typography and whitespace carrying all the identity. There is no accent color; there is no decorative chrome; there is no competing structure. Calm, minimal, and human — the design whispers so the writing can speak.
 
-Density is deliberately low. The editor is capped at a comfortable measure (650px) so long-form thought never feels crowded. The bottom navigation is a quiet strip of gray text that darkens on hover and recedes entirely during focused timed sessions. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page.
+Density is deliberately low. The editor fills the window behind a fixed 18px inset on all four sides, so the page feels open at any window size. The bottom navigation is a quiet strip of gray text that darkens on hover and recedes entirely during focused timed sessions. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page.
 
 This system explicitly rejects the cluttered Notion-style tool (dense panels, nested databases, feature-soup chrome) and the generic Notes.app (stock memo-list blandness). It equally rejects the slick dark developer tool. It is a friend's quiet desk, not a control room.
 
@@ -110,10 +110,10 @@ A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Tw
 **Body Font:** Lato (fallback: system sans)
 **Label Font:** System (Apple SF)
 
-**Character:** A calm, humanist pairing. Lato at a generous 1.5× line height creates easy vertical rhythm for long writing sessions; the compact system sans keeps the navigation quiet and unobtrusive. The measure is capped at 650px to protect comfortable reading.
+**Character:** A calm, humanist pairing. Lato at a generous 1.5× line height creates easy vertical rhythm for long writing sessions; the compact system sans keeps the navigation quiet and unobtrusive. A fixed 18px page inset keeps the text off the window edges.
 
 ### Hierarchy
-- **Body** (regular, 18px, 1.5× line height): The core surface — the user's writing. Adjustable from 16–26px with 1.5× line height preserved. Max width 650px.
+- **Body** (regular, 18px, 1.5× line height): The core surface — the user's writing. Adjustable from 16–26px with 1.5× line height preserved. Full window width, inset 18px on all four sides.
 - **Label** (regular, 13px): Navigation controls, sidebar entry previews, action buttons.
 - **Label Small** (regular, 12px): Entry dates, secondary sidebar metadata, popover sublabels.
 - **Display/Headline**: Intentionally absent. A writing tool has no hero headings; the writing is the only "display."
@@ -148,7 +148,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 - **Shadow:** None.
 
 ### Editor
-- **Style:** Borderless and backgroundless text, transparent scrollbars, centered measure of 650px, 40px top breathing room.
+- **Style:** Borderless and backgroundless text, transparent scrollbars, full-bleed page with a fixed 18px inset on all four sides.
 - **Focus:** None — it is always focused by design; there is no frame or glow to signal editing.
 - **Placeholder:** Faint Placeholder Gray hint in the empty state, removed the instant the writer types.
 
@@ -170,7 +170,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 - **Do** use the soft ink values (#333333 light / #E6E6E6 dark) for body text over the muted gray; never read near-ink against a tinted background.
 - **Do** reserve the single Menu Float shadow for popovers only.
 - **Do** keep selection and hover states whisper-subtle (gray at 10% / 5%).
-- **Do** protect the 650px measure and 1.5× line height for long-session comfort.
+- **Do** protect the fixed 18px page inset and 1.5× line height for long-session comfort.
 - **Do** let the interface recede during timed writing — hiding the nav is a feature, not a bug.
 
 ### Don't:

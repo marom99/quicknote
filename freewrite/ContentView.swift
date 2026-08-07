@@ -78,6 +78,9 @@ struct ContentView: View {
     @State private var selectedVideoHasTranscript = false
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
     let entryHeight: CGFloat = 40
+    private let editorInset: CGFloat = 18
+    // Extra clearance so the last line stays above the floating bottom nav.
+    private let bottomNavClearance: CGFloat = 50
     
     let placeholderOptions = [
         "Begin writing",
@@ -619,7 +622,6 @@ struct ContentView: View {
     
     var body: some View {
         let buttonBackground = colorScheme == .light ? Color.white : Color.black
-        let navHeight: CGFloat = 68
         let textColor = colorScheme == .light ? Color.gray : Color.gray.opacity(0.8)
         let textHoverColor = colorScheme == .light ? Color.black : Color.white
         let isViewingVideoEntry = currentVideoURL != nil
@@ -659,11 +661,11 @@ struct ContentView: View {
                                     .allowsHitTesting(false)
                             }
                         }
-                        .frame(maxWidth: 650, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(.top, 40)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, bottomNavOpacity > 0 ? navHeight : 0)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        // Fixed 18pt page inset; extra bottom clearance keeps text above the floating nav.
+                        .padding(.top, editorInset)
+                        .padding(.horizontal, editorInset)
+                        .padding(.bottom, editorInset + bottomNavClearance)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
                         .colorScheme(colorScheme)
                         .onAppear {
