@@ -995,4 +995,4 @@ Minimal and calm by default — the UI's job is to disappear during timed writin
 - **The One Ink Rule.** No accent or brand color, ever — strictly black / white / gray / their transparencies.
 - **The Flat-By-Default Rule.** Flat surfaces; one whisper shadow (`rgba(0,0,0,0.10)` @ 4px) reserved for floating popovers only.
 - **The One Voice Rule.** System chrome always speaks in the native system sans; the writer's words may use Lato / Arial / System / Serif / random.
-- Body ink: `#333333` (light) / `#E6E6E6` (dark). Selection/hover fills: gray at 10% / 5%. Editor measure 650px, 1.5× line height.
+- Body ink: `#333333` (light) / `#E6E6E6` (dark). Selection/hover fills: gray at 10% / 5%. Editor fills the window with a fixed 18px inset on all four sides, 1.5× line height.

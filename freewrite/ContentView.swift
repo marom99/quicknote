@@ -78,6 +78,14 @@ struct ContentView: View {
     @State private var selectedVideoHasTranscript = false
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
     let entryHeight: CGFloat = 40
+    private let editorInset: CGFloat = 18
+    // NSTextView line-fragment padding (horizontal only; top inset is 0).
+    private let editorNativeTextPadding: CGFloat = 5
+    // Bottom nav: 12pt above/below ~16pt controls ≈ 40pt tall.
+    private let bottomNavVerticalPadding: CGFloat = 12
+    private let bottomNavHeight: CGFloat = 40
+    // Gap between the last editor line and the nav's top border.
+    private let bottomNavContentGap: CGFloat = 8
     
     let placeholderOptions = [
         "Begin writing",
@@ -619,7 +627,6 @@ struct ContentView: View {
     
     var body: some View {
         let buttonBackground = colorScheme == .light ? Color.white : Color.black
-        let navHeight: CGFloat = 68
         let textColor = colorScheme == .light ? Color.gray : Color.gray.opacity(0.8)
         let textHoverColor = colorScheme == .light ? Color.black : Color.white
         let isViewingVideoEntry = currentVideoURL != nil
@@ -654,16 +661,18 @@ struct ContentView: View {
                                 Text(placeholderText)
                                     .font(.custom(selectedFont, size: fontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
-                                    // Match NSTextView's default textContainerInset (5, 0) — no extra top inset.
-                                    .padding(.leading, 5)
+                                    // Align with NSTextView's native horizontal line-fragment padding.
+                                    .padding(.leading, editorNativeTextPadding)
                                     .allowsHitTesting(false)
                             }
                         }
-                        .frame(maxWidth: 650, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(.top, 40)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, bottomNavOpacity > 0 ? navHeight : 0)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        // Fixed 18pt page inset to the glyph origin: subtract the editor's
+                        // native 5pt horizontal padding so text sits 18pt from the window edge.
+                        // Bottom clearance is a scroll content margin with an 8pt gap above the nav border.
+                        .padding(.top, editorInset)
+                        .padding(.horizontal, editorInset - editorNativeTextPadding)
+                        .contentMargins(.bottom, bottomNavHeight + bottomNavContentGap, for: .scrollContent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
                         .colorScheme(colorScheme)
                         .onAppear {
@@ -697,8 +706,6 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                            .padding(8)
-                            .cornerRadius(6)
                             .onHover { hovering in
                                 isHoveringBottomNav = hovering
                             }
@@ -772,14 +779,19 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .padding(8)
-                        .cornerRadius(6)
                         .onHover { hovering in
                             isHoveringBottomNav = hovering
                         }
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, bottomNavVerticalPadding - 1)
+                    .padding(.bottom, bottomNavVerticalPadding)
                     .background(Color(colorScheme == .light ? .white : .black))
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(colorScheme == .light ? 0.2 : 0.35))
+                            .frame(height: 1)
+                    }
                     .opacity(bottomNavOpacity)
                         .onHover { hovering in
                             isHoveringBottomNav = hovering
@@ -950,7 +962,7 @@ struct ContentView: View {
             }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
-        // and top padding (40) + bottom nav (68) need leftover vertical room to write.
+        // and top inset + bottom nav need leftover vertical room to write.
         .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
