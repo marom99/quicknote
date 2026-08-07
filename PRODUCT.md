@@ -61,7 +61,6 @@ The quietest local-first freewrite surface on macOS: open the app and you are al
 
 - Marketing / download site: [https://www.freewrite.io/](https://www.freewrite.io/)
 - Open-source repository with README demo GIF (`https://i.imgur.com/2ucbtff.gif`)
-- Local sample / default content: `freewrite/default.md`
 - Bundled typeface: Lato (`freewrite/fonts/`)
 - Design system record: `DESIGN.md` and `.impeccable/design.json` ("The Quiet Page")
 - No customer testimonials, benchmarks, pricing claims, or press quotes are on hand — future work must not invent them.
