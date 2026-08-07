@@ -79,8 +79,11 @@ struct ContentView: View {
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
     let entryHeight: CGFloat = 40
     private let editorInset: CGFloat = 18
-    // Extra clearance so the last line stays above the floating bottom nav.
-    private let bottomNavClearance: CGFloat = 50
+    // Bottom nav: 12pt above/below ~16pt controls ≈ 40pt tall.
+    private let bottomNavVerticalPadding: CGFloat = 12
+    private let bottomNavHeight: CGFloat = 40
+    // Gap between the last editor line and the nav's top border.
+    private let bottomNavContentGap: CGFloat = 8
     
     let placeholderOptions = [
         "Begin writing",
@@ -656,15 +659,18 @@ struct ContentView: View {
                                 Text(placeholderText)
                                     .font(.custom(selectedFont, size: fontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
-                                    // Match NSTextView's default textContainerInset (5, 0) — no extra top inset.
+                                    // Matches the editor's native text origin: 5pt horizontal line-fragment
+                                    // padding, zero top inset (verified — the first glyph renders at y=0).
                                     .padding(.leading, 5)
                                     .allowsHitTesting(false)
                             }
                         }
-                        // Fixed 18pt page inset; extra bottom clearance keeps text above the floating nav.
+                        // Fixed 18pt page inset. Bottom clearance is a scroll content
+                        // margin so the editor paper runs under the transparent nav, with
+                        // an 8pt gap between the last line and the nav border.
                         .padding(.top, editorInset)
                         .padding(.horizontal, editorInset)
-                        .padding(.bottom, editorInset + bottomNavClearance)
+                        .contentMargins(.bottom, bottomNavHeight + bottomNavContentGap, for: .scrollContent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
                         .colorScheme(colorScheme)
@@ -699,8 +705,6 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                            .padding(8)
-                            .cornerRadius(6)
                             .onHover { hovering in
                                 isHoveringBottomNav = hovering
                             }
@@ -774,14 +778,19 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .padding(8)
-                        .cornerRadius(6)
                         .onHover { hovering in
                             isHoveringBottomNav = hovering
                         }
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, bottomNavVerticalPadding - 1)
+                    .padding(.bottom, bottomNavVerticalPadding)
                     .background(Color(colorScheme == .light ? .white : .black))
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(colorScheme == .light ? 0.2 : 0.35))
+                            .frame(height: 1)
+                    }
                     .opacity(bottomNavOpacity)
                         .onHover { hovering in
                             isHoveringBottomNav = hovering
@@ -952,7 +961,7 @@ struct ContentView: View {
             }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
-        // and top padding (40) + bottom nav (68) need leftover vertical room to write.
+        // and top inset + bottom nav need leftover vertical room to write.
         .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
