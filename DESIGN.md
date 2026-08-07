@@ -10,10 +10,12 @@ colors:
   row-selected: "rgba(128,128,128,0.10)"
   row-hover: "rgba(128,128,128,0.05)"
   placeholder: "rgba(128,128,128,0.50)"
+  border-muted-light: "rgba(128,128,128,0.20)"
+  border-muted-dark: "rgba(128,128,128,0.35)"
 typography:
   body:
     fontFamily: "Lato, Lato-Regular, -apple-system, sans-serif"
-    fontSize: "18px"
+    fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.5
     inset: "18px"
@@ -32,6 +34,10 @@ spacing:
   xs: "4px"
   sm: "8px"
   md: "16px"
+  editor-inset: "18px"
+  nav-vertical: "12px"
+  nav-content-gap: "8px"
+  sidebar-width: "200px"
 components:
   nav-button:
     textColor: "{colors.ink-muted}"
@@ -65,17 +71,24 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     inset: "18px"
+  title-bar:
+    backgroundColor: "{colors.paper}"
+    height: "28px"
+  bottom-nav-bar:
+    backgroundColor: "{colors.paper}"
+    height: "40px"
+    padding: "12px"
 ---
 
 # Design System: Freewrite
 
-## 1. Overview
+## Overview
 
 **Creative North Star: "The Quiet Page"**
 
 Freewrite's visual system is built to vanish. The product is a distraction-free writing environment — the point is that nothing on screen competes with the words (or the video) being captured. The interface reads as a nearly empty page: white in light mode, black in dark mode, with typography and whitespace carrying all the identity. There is no accent color; there is no decorative chrome; there is no competing structure. Calm, minimal, and human — the design whispers so the writing can speak.
 
-Density is deliberately low. The editor fills the window behind a fixed 18px page inset, so the page feels open at any window size; scroll content keeps an 8px gap above the floating navigation so the last line never touches its border. The bottom navigation itself is a quiet, always-visible strip of gray text that darkens on hover, with 12px padding above and below the controls. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page.
+Density is deliberately low. The editor fills the window behind a fixed 18px page inset, so the page feels open at any window size; scroll content keeps an 8px gap above the floating navigation so the last line never touches its border. The bottom navigation itself is a quiet, always-visible strip of gray text that darkens on hover, with 12px padding above and below the controls. The native title bar mirrors the same paper/night fill and carries a matching 1px muted rule at its bottom edge. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page.
 
 This system explicitly rejects the cluttered Notion-style tool (dense panels, nested databases, feature-soup chrome) and the generic Notes.app (stock memo-list blandness). It equally rejects the slick dark developer tool. It is a friend's quiet desk, not a control room.
 
@@ -86,7 +99,7 @@ This system explicitly rejects the cluttered Notion-style tool (dense panels, ne
 - Native macOS restraint — it should feel at home on the platform, never like a ported web UI.
 - The interface's highest goal is to disappear during writing.
 
-## 2. Colors
+## Colors
 
 A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Two themes mirror each other: light (paper + soft off-black ink) and dark (night + soft off-white ink).
 
@@ -101,11 +114,12 @@ A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Tw
 - **Placeholder Gray** (#808080 at 50%): The empty-editor hint ("Begin writing"), deliberately faint so it never competes with real words.
 - **Row Selected** (#808080 at 10%): The selected entry's background in the history sidebar.
 - **Row Hover** (#808080 at 5%): The hover background for sidebar rows — nearly imperceptible, always calm.
+- **Border Muted** (gray at 20% light / 35% dark): The 1px rules separating title bar and bottom nav from the page. Same opacity in both places so the frame feels balanced.
 
 ### Named Rules
 **The One Ink Rule.** There is exactly one ink family. Any color that isn't black, white, gray, or a transparency of those is forbidden. Rarity of any accent is moot — there simply is none.
 
-## 3. Typography
+## Typography
 
 **Body Font:** Lato (fallback: system sans)
 **Label Font:** System (Apple SF)
@@ -113,7 +127,7 @@ A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Tw
 **Character:** A calm, humanist pairing. Lato at a generous 1.5× line height creates easy vertical rhythm for long writing sessions; the compact system sans keeps the navigation quiet and unobtrusive. A fixed 18px page inset keeps the text off the window edges.
 
 ### Hierarchy
-- **Body** (regular, 18px, 1.5× line height): The core surface — the user's writing. Adjustable from 16–26px with 1.5× line height preserved. Full window width, inset 18px; the bottom edge adds reserved clearance for the floating navigation.
+- **Body** (regular, 14px default, 1.5× line height): The core surface — the user's writing. Full window width, inset 18px; the bottom edge adds reserved clearance for the floating navigation.
 - **Label** (regular, 13px): Navigation controls, sidebar entry previews, action buttons.
 - **Label Small** (regular, 12px): Entry dates, secondary sidebar metadata, popover sublabels.
 - **Display/Headline**: Intentionally absent. A writing tool has no hero headings; the writing is the only "display."
@@ -121,7 +135,15 @@ A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Tw
 ### Named Rules
 **The One Voice Rule.** Every font is an option the *writer* chooses for their own words (Lato, Arial, System, Serif, or random). The system chrome itself always speaks in the native system sans — the tool's voice stays distinct from the writer's.
 
-## 4. Elevation
+## Layout
+
+The editor is full-bleed within the window content area, with a fixed **18px inset** on all sides (adjusted for NSTextView's native 5px horizontal line-fragment padding so glyphs sit exactly 18pt from the window edge). Scroll content reserves **48px** of bottom margin (40px nav height + 8px content gap) so the last line never touches the nav border.
+
+The **bottom navigation** is a 40px-tall strip with 12px vertical padding, pinned to the window bottom. The **history sidebar** is a fixed **200px** column separated from the editor by a native `Divider`. Minimum window size is **280×200** (editor only) or **480×200** when the sidebar is open.
+
+Density stays low: no cards, no nested panels, no column measure cap — the page breathes at any window width.
+
+## Elevation & Depth
 
 Flat by default. The system conveys hierarchy through ink weight and tonal layering (selection fills, divider lines), not through shadows. Depth appears in exactly one place: floating menus (popovers), which need to read as sitting above the page.
 
@@ -131,7 +153,11 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 ### Named Rules
 **The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only to lift a floating menu off the page — never as card decoration, never on the writing surface itself.
 
-## 5. Components
+## Shapes
+
+Corners are restrained. Sidebar rows and video thumbnails use a gentle **4px radius**; navigation hover targets allow **8px** rounding. Borders are **1px** rules only — used on the title bar bottom edge and the bottom nav top edge, never as card outlines or editor frames. Dividers between sidebar sections are native macOS hairlines.
+
+## Components
 
 ### Buttons (Navigation & Actions)
 - **Shape:** Invisible until hover — plain text, no border, no background.
@@ -156,7 +182,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 - **Style:** None present — the app avoids form-like inputs entirely in its core loop.
 
 ### Title Bar
-- **Style:** Native macOS title bar (traffic lights + centered title) with a solid paper/night fill matching the editor. Separated from the page by a 1px muted bottom border — same gray opacity as the bottom nav (20% light / 35% dark).
+- **Style:** Native macOS title bar (traffic lights + centered entry title) with a solid paper/night fill matching the editor. Separated from the page by a 1px muted bottom border — same gray opacity as the bottom nav (20% light / 35% dark). System separator hidden; border is a custom AppKit layer pinned to the titlebar container bottom.
 
 ### Navigation (Bottom Bar)
 - **Style:** A flat strip (40px, with 12px vertical padding) at the bottom of the window, separated from the page by a 1px muted top border; content-matched background (white/black), with an 8px editor content gap above the border.
@@ -166,7 +192,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 ### Video Player
 - **Style:** Standard AVKit controls. The player surface fills the content area with no chrome, so the recording is the whole experience.
 
-## 6. Do's and Don'ts
+## Do's and Don'ts
 
 ### Do:
 - **Do** keep the writing surface utterly bare — no borders, frames, shadows, or background tint on the editor.
@@ -175,6 +201,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 - **Do** keep selection and hover states whisper-subtle (gray at 10% / 5%).
 - **Do** protect the fixed 18px page inset and 1.5× line height for long-session comfort.
 - **Do** let the interface recede during timed writing — hiding the nav is a feature, not a bug.
+- **Do** keep title bar and bottom nav borders visually paired — same 1px muted rule, same opacity values.
 
 ### Don't:
 - **Don't** introduce any accent or brand color — this is strictly monochrome (ink-only).
