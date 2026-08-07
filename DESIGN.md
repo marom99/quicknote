@@ -144,7 +144,7 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 - **Shape:** Gently curved (4px radius), full-width.
 - **Background:** Clear at rest; Row Hover (gray/5%) on hover; Row Selected (gray/10%) when active.
 - **Content:** Entry preview (13px) + date (12px) stacked; video entries show a 40px rounded thumbnail with a play overlay.
-- **Hover Actions:** Export (PDF) and trash icons fade in on hover, right-aligned; trash turns red on hover.
+- **Hover Actions:** Trash icon fades in on hover, right-aligned; turns red on hover.
 - **Shadow:** None.
 
 ### Editor
