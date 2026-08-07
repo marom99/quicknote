@@ -45,7 +45,6 @@ Freewrite is a **distraction-free writing environment** for macOS designed aroun
 
 **Hidden Power Feature - Long-Form Writing:**
 - Despite minimalist interface, supports full markdown
-- Entries can be exported as PDFs
 - Font and size customization for comfort during long sessions
 - Dark mode for night writing
 
@@ -776,26 +775,6 @@ if let encodedText = fullText.addingPercentEncoding(withAllowedCharacters: .urlQ
 - URLs >6000 chars fail in some browsers
 - If too long, shows "Copy Prompt" button instead
 - Copies to clipboard for manual paste
-
-### PDF Export Implementation
-
-```swift
-func exportEntryAsPDF(entry: HumanEntry) {
-    let savePanel = NSSavePanel()
-    savePanel.title = extractTitleFromContent(content, date: entry.date)
-    savePanel.allowedContentTypes = [.pdf]
-
-    if savePanel.runModal() == .OK {
-        let pdfData = createPDF(from: content)
-        try pdfData.write(to: savePanel.url!)
-    }
-}
-```
-
-**Title Extraction**:
-- Takes first 4 words of content
-- Removes punctuation
-- Falls back to "Entry [date]" if content empty
 
 ### Theme System
 
