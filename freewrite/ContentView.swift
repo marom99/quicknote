@@ -1084,24 +1084,11 @@ struct ContentView: View {
         historyDebug("NEW ENTRY created \(debugEntrySummary(newEntry))")
         logEntriesOrder("createNewEntry")
 
-        // If this is the first entry (entries was empty before adding this one)
-        if entries.count == 1 {
-            // Read welcome message from default.md
-            if let defaultMessageURL = Bundle.main.url(forResource: "default", withExtension: "md"),
-               let defaultMessage = try? String(contentsOf: defaultMessageURL, encoding: .utf8) {
-                text = defaultMessage
-            }
-            // Save the welcome message immediately
-            saveEntry(entry: newEntry)
-            // Update the preview text
-            updatePreviewText(for: newEntry)
-        } else {
-            text = ""
-            // Randomize placeholder text for new entry
-            placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-            // Save the empty entry
-            saveEntry(entry: newEntry)
-        }
+        text = ""
+        // Randomize placeholder text for new entry
+        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+        // Save the empty entry
+        saveEntry(entry: newEntry)
     }
     
     private func deleteEntry(entry: HumanEntry) {
