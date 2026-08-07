@@ -186,7 +186,7 @@ Corners are restrained. Sidebar rows and video thumbnails use a gentle **4px rad
 
 ### Navigation (Bottom Bar)
 - **Style:** A flat strip (40px, with 12px vertical padding) at the bottom of the window, separated from the page by a 1px muted top border; content-matched background (white/black), with an 8px editor content gap above the border.
-- **State:** During a timed session it fades out after a moment and reappears on hover; when idle it stays at full opacity.
+- **State:** Always visible at full opacity while writing. Focus-timer auto-hide is not part of the current product surface.
 - **Treatment:** Gray text labels and icons separated by muted dots; each darkens on hover.
 
 ### Video Player
@@ -200,7 +200,7 @@ Corners are restrained. Sidebar rows and video thumbnails use a gentle **4px rad
 - **Do** reserve the single Menu Float shadow for popovers only.
 - **Do** keep selection and hover states whisper-subtle (gray at 10% / 5%).
 - **Do** protect the fixed 18px page inset and 1.5× line height for long-session comfort.
-- **Do** let the interface recede during timed writing — hiding the nav is a feature, not a bug.
+- **Do** keep the bottom nav always visible at full opacity while writing — focus-timer chrome is not part of the current surface.
 - **Do** keep title bar and bottom nav borders visually paired — same 1px muted rule, same opacity values.
 
 ### Don't:

@@ -24,8 +24,8 @@
       { "name": "menu-float", "value": "rgba(0,0,0,0.10) 0px 2px 4px", "purpose": "The single shadow in the system; reserved for floating popovers only." }
     ],
     "motion": [
-      { "name": "ease-standard", "value": "ease-in-out 0.2s", "purpose": "Default for state transitions (nav fade, sidebar slide, hover)." },
-      { "name": "ease-reveal", "value": "ease-out 0.2s", "purpose": "Nav reappearing on hover during timed sessions." }
+      { "name": "ease-standard", "value": "ease-in-out 0.2s", "purpose": "Default for state transitions (sidebar open/close, hover fills, control color shifts)." },
+      { "name": "ease-reveal", "value": "ease-out 0.2s", "purpose": "Short opacity restores and soft reveals (e.g. hover affordances)." }
     ],
     "breakpoints": []
   },
@@ -100,7 +100,7 @@
       "Do reserve the single Menu Float shadow for popovers only.",
       "Do keep selection and hover states whisper-subtle (gray at 10% / 5%).",
       "Do protect the fixed 18px page inset and 1.5× line height for long-session comfort.",
-      "Do let the interface recede during timed writing — hiding the nav is a feature, not a bug.",
+      "Do keep the bottom nav always visible at full opacity while writing — focus-timer chrome is not part of the current surface.",
       "Do keep title bar and bottom nav borders visually paired — same 1px muted rule, same opacity values."
     ],
     "donts": [
