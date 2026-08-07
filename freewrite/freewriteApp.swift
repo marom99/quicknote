@@ -80,6 +80,9 @@ enum WindowChrome {
         }
     }
 
+    /// Matches ContentView bottom-nav border: gray @ 20% light / 35% dark.
+    private static let titlebarBorderID = NSUserInterfaceItemIdentifier("FreewriteTitlebarBorder")
+
     static func apply(to window: NSWindow) {
         guard shouldStyle(window) else { return }
         let state = state(for: window)
@@ -93,12 +96,14 @@ enum WindowChrome {
         window.backgroundColor = state.isDark ? .black : .white
 
         if #available(macOS 11.0, *) {
+            // Custom 1px border below matches the bottom nav; hide the system separator.
             window.titlebarSeparatorStyle = .none
         }
 
         // macOS re-injects a material fill into the title bar when key status changes.
         // Clear it so the solid window / content color shows through.
         clearTitlebarMaterials(in: window)
+        ensureTitlebarBorder(in: window, isDark: state.isDark)
 
         // Re-apply after the run loop so we win races against AppKit's own redraw.
         DispatchQueue.main.async {
@@ -109,6 +114,7 @@ enum WindowChrome {
                 window.titlebarSeparatorStyle = .none
             }
             clearTitlebarMaterials(in: window)
+            ensureTitlebarBorder(in: window, isDark: state.isDark)
         }
     }
 
@@ -117,21 +123,67 @@ enum WindowChrome {
         window.contentView != nil && !window.className.contains("NSStatusBar")
     }
 
-    private static func clearTitlebarMaterials(in window: NSWindow) {
-        guard let closeButton = window.standardWindowButton(.closeButton) else { return }
+    private static func titlebarContainer(in window: NSWindow) -> NSView? {
+        guard let closeButton = window.standardWindowButton(.closeButton) else { return nil }
 
         // closeButton → titlebar view → titlebar container
         var view: NSView? = closeButton.superview
         while let current = view {
-            neutralizeTitlebarMaterials(in: current)
             if current.className.contains("TitlebarContainer") {
+                return current
+            }
+            view = current.superview
+        }
+        return nil
+    }
+
+    private static func clearTitlebarMaterials(in window: NSWindow) {
+        guard let container = titlebarContainer(in: window) else { return }
+
+        var view: NSView? = window.standardWindowButton(.closeButton)?.superview
+        while let current = view {
+            neutralizeTitlebarMaterials(in: current)
+            if current === container {
                 break
             }
             view = current.superview
         }
     }
 
+    /// 1px muted rule under the title bar — same treatment as the bottom nav's top border.
+    private static func ensureTitlebarBorder(in window: NSWindow, isDark: Bool) {
+        guard let container = titlebarContainer(in: window) else { return }
+
+        let borderColor = NSColor.gray.withAlphaComponent(isDark ? 0.35 : 0.2).cgColor
+
+        let border: NSView
+        if let existing = container.subviews.first(where: { $0.identifier == titlebarBorderID }) {
+            border = existing
+        } else {
+            let view = NSView(frame: .zero)
+            view.identifier = titlebarBorderID
+            view.wantsLayer = true
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                view.heightAnchor.constraint(equalToConstant: 1),
+            ])
+            border = view
+        }
+
+        border.wantsLayer = true
+        border.layer?.backgroundColor = borderColor
+        border.layer?.zPosition = 10_000
+    }
+
     private static func neutralizeTitlebarMaterials(in root: NSView) {
+        if root.identifier == titlebarBorderID {
+            return
+        }
+
         if let effectView = root as? NSVisualEffectView {
             // Hidden effect views stop AppKit from painting the gray material strip.
             effectView.isHidden = true

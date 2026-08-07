@@ -155,6 +155,9 @@ Flat by default. The system conveys hierarchy through ink weight and tonal layer
 ### Inputs / Fields
 - **Style:** None present — the app avoids form-like inputs entirely in its core loop.
 
+### Title Bar
+- **Style:** Native macOS title bar (traffic lights + centered title) with a solid paper/night fill matching the editor. Separated from the page by a 1px muted bottom border — same gray opacity as the bottom nav (20% light / 35% dark).
+
 ### Navigation (Bottom Bar)
 - **Style:** A flat strip (40px, with 12px vertical padding) at the bottom of the window, separated from the page by a 1px muted top border; content-matched background (white/black), with an 8px editor content gap above the border.
 - **State:** During a timed session it fades out after a moment and reappears on hover; when idle it stays at full opacity.
