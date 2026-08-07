@@ -79,6 +79,8 @@ struct ContentView: View {
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
     let entryHeight: CGFloat = 40
     private let editorInset: CGFloat = 18
+    // NSTextView line-fragment padding (horizontal only; top inset is 0).
+    private let editorNativeTextPadding: CGFloat = 5
     // Bottom nav: 12pt above/below ~16pt controls ≈ 40pt tall.
     private let bottomNavVerticalPadding: CGFloat = 12
     private let bottomNavHeight: CGFloat = 40
@@ -659,17 +661,16 @@ struct ContentView: View {
                                 Text(placeholderText)
                                     .font(.custom(selectedFont, size: fontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
-                                    // Matches the editor's native text origin: 5pt horizontal line-fragment
-                                    // padding, zero top inset (verified — the first glyph renders at y=0).
-                                    .padding(.leading, 5)
+                                    // Align with NSTextView's native horizontal line-fragment padding.
+                                    .padding(.leading, editorNativeTextPadding)
                                     .allowsHitTesting(false)
                             }
                         }
-                        // Fixed 18pt page inset. Bottom clearance is a scroll content
-                        // margin so the editor paper runs under the transparent nav, with
-                        // an 8pt gap between the last line and the nav border.
+                        // Fixed 18pt page inset to the glyph origin: subtract the editor's
+                        // native 5pt horizontal padding so text sits 18pt from the window edge.
+                        // Bottom clearance is a scroll content margin with an 8pt gap above the nav border.
                         .padding(.top, editorInset)
-                        .padding(.horizontal, editorInset)
+                        .padding(.horizontal, editorInset - editorNativeTextPadding)
                         .contentMargins(.bottom, bottomNavHeight + bottomNavContentGap, for: .scrollContent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
