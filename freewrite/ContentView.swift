@@ -228,6 +228,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             let selectedRanges = clampedSelectedRanges(textView.selectedRanges, maxLength: (text as NSString).length)
             isUpdatingText = true
             textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+            textView.undoManager?.removeAllActions()
             textView.selectedRanges = selectedRanges
             isUpdatingText = false
         }
