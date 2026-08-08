@@ -943,6 +943,16 @@ Check `~/Documents/Freewrite/` in Finder to verify files are being created.
 - **Lines 430-1200**: Main view body and UI
 - **Lines 1200-1400**: Helper functions (save, load, delete, etc.)
 
+## Native Text Editor and Scrolling
+
+`FreewriteTextEditor` is an `NSViewRepresentable` that owns the editor's `NSScrollView` and `NSTextView`; it replaces the former SwiftUI `TextEditor`. Its coordinator is the bridge between AppKit and the entry state:
+
+1. `NSTextViewDelegate.textDidChange` writes user edits to the bound `text`; the view-level `onChange` then performs the normal auto-save.
+2. `updateNSView` applies typography, colors, insets, and incoming text. When the incoming text differs (for example, after switching entries), it replaces the text storage while `isUpdatingText` suppresses the delegate callback, clamps the existing selection, and clears the undo manager. Clearing undo is required so an Undo action from one entry cannot modify another entry.
+3. The coordinator observes the scroll view's bounds and derives `EditorScrollMetrics` from the text layout. It publishes those metrics asynchronously to avoid mutating SwiftUI state during AppKit layout.
+
+The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeScroller` renders the separate native `NSScroller` at the editor edge, maps its knob position to a fractional `EditorScrollRequest`, and the editor coordinator applies that request to the scroll view. Keep both directions of this metrics/request pipeline intact when changing editor layout or scrolling behavior.
+
 ## Key SwiftUI Patterns Used
 
 - `@State` for local view state
@@ -951,7 +961,7 @@ Check `~/Documents/Freewrite/` in Finder to verify files are being created.
 - `.onChange(of:)` for auto-save
 - `.onAppear` for initialization
 - `ForEach(entries)` with `Identifiable` for list rendering
-- Conditional views: `if currentVideoURL != nil { VideoPlayerView } else { TextEditor }`
+- Conditional views: `if currentVideoURL != nil { VideoPlayerView } else { FreewriteTextEditor }`
 
 ## Summary
 

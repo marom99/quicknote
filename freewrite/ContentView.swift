@@ -50,6 +50,324 @@ struct HeartEmoji: Identifiable {
     var offset: CGFloat = 0
 }
 
+struct EditorScrollMetrics: Equatable {
+    var contentHeight: CGFloat = 1
+    var viewportHeight: CGFloat = 1
+    var offsetY: CGFloat = 0
+
+    var maxOffset: CGFloat {
+        max(contentHeight - viewportHeight, 0)
+    }
+
+    var canScroll: Bool {
+        maxOffset > 1
+    }
+
+    var offsetFraction: CGFloat {
+        guard canScroll else { return 0 }
+        return min(max(offsetY / maxOffset, 0), 1)
+    }
+}
+
+struct EditorScrollRequest: Equatable {
+    let id = UUID()
+    let fraction: CGFloat
+}
+
+struct FreewriteTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var scrollRequest: EditorScrollRequest?
+
+    let editorID: UUID?
+    let selectedFont: String
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    let colorScheme: ColorScheme
+    let editorInset: CGFloat
+    let editorNativeTextPadding: CGFloat
+    let bottomContentMargin: CGFloat
+    let onScrollMetricsChange: (EditorScrollMetrics) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onScrollMetricsChange: onScrollMetricsChange)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.contentInsets = NSEdgeInsets(
+            top: 0,
+            left: 0,
+            bottom: max(bottomContentMargin - editorInset, 0),
+            right: 0
+        )
+        scrollView.contentView.postsBoundsChangedNotifications = true
+
+        let textView = NSTextView(frame: .zero)
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.lineFragmentPadding = editorNativeTextPadding
+        textView.textContainerInset = NSSize(
+            width: max(editorInset - editorNativeTextPadding, 0),
+            height: editorInset
+        )
+        textView.delegate = context.coordinator
+
+        scrollView.documentView = textView
+        context.coordinator.scrollView = scrollView
+        context.coordinator.textView = textView
+        context.coordinator.configureTextView(
+            textView,
+            text: text,
+            editorID: editorID,
+            selectedFont: selectedFont,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            colorScheme: colorScheme
+        )
+        context.coordinator.startObservingBoundsChanges()
+        context.coordinator.publishScrollMetrics()
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        scrollView.contentInsets = NSEdgeInsets(
+            top: 0,
+            left: 0,
+            bottom: max(bottomContentMargin - editorInset, 0),
+            right: 0
+        )
+
+        if let textView = context.coordinator.textView {
+            textView.textContainer?.lineFragmentPadding = editorNativeTextPadding
+            textView.textContainerInset = NSSize(
+                width: max(editorInset - editorNativeTextPadding, 0),
+                height: editorInset
+            )
+            context.coordinator.configureTextView(
+                textView,
+                text: text,
+                editorID: editorID,
+                selectedFont: selectedFont,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                colorScheme: colorScheme
+            )
+        }
+
+        if let request = scrollRequest, request != context.coordinator.lastAppliedScrollRequest {
+            context.coordinator.scrollTo(fraction: request.fraction)
+            context.coordinator.lastAppliedScrollRequest = request
+        }
+
+        context.coordinator.publishScrollMetrics()
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.stopObservingBoundsChanges()
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding private var text: String
+        private let onScrollMetricsChange: (EditorScrollMetrics) -> Void
+        private var boundsObserver: NSObjectProtocol?
+        private var isUpdatingText = false
+
+        weak var scrollView: NSScrollView?
+        weak var textView: NSTextView?
+        var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastConfiguredEditorID: UUID?
+
+        init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
+            _text = text
+            self.onScrollMetricsChange = onScrollMetricsChange
+        }
+
+        func configureTextView(
+            _ textView: NSTextView,
+            text: String,
+            editorID: UUID?,
+            selectedFont: String,
+            fontSize: CGFloat,
+            lineSpacing: CGFloat,
+            colorScheme: ColorScheme
+        ) {
+            let editorChanged = lastConfiguredEditorID != editorID
+            let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
+            let textColor = colorScheme == .light
+                ? NSColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1.0)
+                : NSColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0)
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineSpacing = max(lineSpacing, 0)
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: textColor,
+                .paragraphStyle: paragraphStyle,
+            ]
+
+            textView.typingAttributes = attributes
+            textView.defaultParagraphStyle = paragraphStyle
+            textView.insertionPointColor = textColor
+
+            guard textView.string != text else {
+                textView.textColor = textColor
+                textView.font = font
+                if editorChanged {
+                    textView.undoManager?.removeAllActions()
+                    lastConfiguredEditorID = editorID
+                }
+                return
+            }
+
+            let selectedRanges = clampedSelectedRanges(textView.selectedRanges, maxLength: (text as NSString).length)
+            isUpdatingText = true
+            textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+            textView.undoManager?.removeAllActions()
+            textView.selectedRanges = selectedRanges
+            isUpdatingText = false
+            lastConfiguredEditorID = editorID
+        }
+
+        func startObservingBoundsChanges() {
+            guard boundsObserver == nil, let contentView = scrollView?.contentView else { return }
+            boundsObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: contentView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.publishScrollMetrics()
+            }
+        }
+
+        func stopObservingBoundsChanges() {
+            if let boundsObserver {
+                NotificationCenter.default.removeObserver(boundsObserver)
+            }
+            boundsObserver = nil
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard !isUpdatingText, let textView else { return }
+            text = textView.string
+            publishScrollMetrics()
+        }
+
+        func scrollTo(fraction: CGFloat) {
+            guard let scrollView else { return }
+            let metrics = currentMetrics()
+            guard metrics.canScroll else { return }
+            let y = min(max(fraction, 0), 1) * metrics.maxOffset
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            publishScrollMetrics()
+        }
+
+        func publishScrollMetrics() {
+            guard let textView, let textContainer = textView.textContainer else { return }
+            textView.layoutManager?.ensureLayout(for: textContainer)
+            let metrics = currentMetrics()
+            DispatchQueue.main.async { [onScrollMetricsChange] in
+                onScrollMetricsChange(metrics)
+            }
+        }
+
+        private func clampedSelectedRanges(_ ranges: [NSValue], maxLength: Int) -> [NSValue] {
+            ranges.map { value in
+                let range = value.rangeValue
+                let location = min(range.location, maxLength)
+                let length = min(range.length, max(maxLength - location, 0))
+                return NSValue(range: NSRange(location: location, length: length))
+            }
+        }
+
+        private func currentMetrics() -> EditorScrollMetrics {
+            guard let scrollView, let textView else {
+                return EditorScrollMetrics()
+            }
+
+            let viewportHeight = max(scrollView.contentView.bounds.height, 1)
+            let textContainer = textView.textContainer
+            let usedRect = textContainer.flatMap { textView.layoutManager?.usedRect(for: $0) } ?? .zero
+            let contentHeight = max(
+                usedRect.height + (textView.textContainerInset.height * 2) + scrollView.contentInsets.bottom,
+                viewportHeight
+            )
+            let offsetY = min(max(scrollView.contentView.bounds.origin.y, 0), max(contentHeight - viewportHeight, 0))
+
+            return EditorScrollMetrics(
+                contentHeight: contentHeight,
+                viewportHeight: viewportHeight,
+                offsetY: offsetY
+            )
+        }
+    }
+}
+
+struct NativeEditorEdgeScroller: NSViewRepresentable {
+    let metrics: EditorScrollMetrics
+    let colorScheme: ColorScheme
+    let onScrollFractionChange: (CGFloat) -> Void
+
+    final class Coordinator: NSObject {
+        let onScrollFractionChange: (CGFloat) -> Void
+
+        init(onScrollFractionChange: @escaping (CGFloat) -> Void) {
+            self.onScrollFractionChange = onScrollFractionChange
+        }
+
+        @objc func scrollerChanged(_ sender: NSScroller) {
+            onScrollFractionChange(CGFloat(sender.doubleValue))
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScrollFractionChange: onScrollFractionChange)
+    }
+
+    func makeNSView(context: Context) -> NSScroller {
+        let scroller = NSScroller()
+        scroller.scrollerStyle = .legacy
+        scroller.controlSize = .regular
+        scroller.target = context.coordinator
+        scroller.action = #selector(Coordinator.scrollerChanged(_:))
+        scroller.isEnabled = metrics.canScroll
+        scroller.isHidden = !metrics.canScroll
+        updateScroller(scroller)
+        return scroller
+    }
+
+    func updateNSView(_ scroller: NSScroller, context: Context) {
+        scroller.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        scroller.isEnabled = metrics.canScroll
+        scroller.isHidden = !metrics.canScroll
+        updateScroller(scroller)
+    }
+
+    private func updateScroller(_ scroller: NSScroller) {
+        let knobProportion = metrics.canScroll
+            ? min(max(metrics.viewportHeight / metrics.contentHeight, 0), 1)
+            : 1
+        scroller.knobProportion = knobProportion
+        scroller.doubleValue = Double(metrics.offsetFraction)
+    }
+}
+
 struct ContentView: View {
     @State private var entries: [HumanEntry] = []
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
@@ -60,6 +378,8 @@ struct ContentView: View {
     @State private var isHoveringBottomNav = false
     @State private var selectedEntryIndex: Int = 0
     @State private var scrollOffset: CGFloat = 0
+    @State private var editorScrollMetrics = EditorScrollMetrics()
+    @State private var editorScrollRequest: EditorScrollRequest?
     @State private var selectedEntryId: UUID? = nil
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
@@ -626,7 +946,6 @@ struct ContentView: View {
 
     
     var body: some View {
-        let buttonBackground = colorScheme == .light ? Color.white : Color.black
         let textColor = colorScheme == .light ? Color.gray : Color.gray.opacity(0.8)
         let textHoverColor = colorScheme == .light ? Color.black : Color.white
         let isViewingVideoEntry = currentVideoURL != nil
@@ -648,13 +967,24 @@ struct ContentView: View {
                         .ignoresSafeArea(edges: .top)
                 } else {
                     // Show text editor for text entries
-                    TextEditor(text: $text)
-                        .background(Color(colorScheme == .light ? .white : .black))
-                        .font(.custom(selectedFont, size: fontSize))
-                        .foregroundColor(colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9))
-                        .scrollContentBackground(.hidden)
-                        .scrollIndicators(.never)
-                        .lineSpacing(lineHeight)
+                    FreewriteTextEditor(
+                        text: $text,
+                        scrollRequest: $editorScrollRequest,
+                        editorID: selectedEntryId,
+                        selectedFont: selectedFont,
+                        fontSize: fontSize,
+                        lineSpacing: lineHeight,
+                        colorScheme: colorScheme,
+                        editorInset: editorInset,
+                        editorNativeTextPadding: editorNativeTextPadding,
+                        bottomContentMargin: bottomNavHeight + bottomNavContentGap,
+                        onScrollMetricsChange: { metrics in
+                            if editorScrollMetrics != metrics {
+                                editorScrollMetrics = metrics
+                            }
+                        }
+                    )
+                    .background(Color(colorScheme == .light ? .white : .black))
                         // Placeholder shares the editor's coordinate space so it sits on the first line.
                         .overlay(alignment: .topLeading) {
                             if text.isEmpty {
@@ -662,22 +992,28 @@ struct ContentView: View {
                                     .font(.custom(selectedFont, size: fontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
                                     // Align with NSTextView's native horizontal line-fragment padding.
-                                    .padding(.leading, editorNativeTextPadding)
+                                    .padding(.top, editorInset)
+                                    .padding(.leading, editorInset)
                                     .allowsHitTesting(false)
                             }
                         }
-                        // Fixed 18pt page inset to the glyph origin: subtract the editor's
-                        // native 5pt horizontal padding so text sits 18pt from the window edge.
-                        // Bottom clearance is a scroll content margin with an 8pt gap above the nav border.
-                        .padding(.top, editorInset)
-                        .padding(.horizontal, editorInset - editorNativeTextPadding)
-                        .contentMargins(.bottom, bottomNavHeight + bottomNavContentGap, for: .scrollContent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
                         .colorScheme(colorScheme)
                         .onAppear {
                             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
                         }
+
+                    NativeEditorEdgeScroller(
+                        metrics: editorScrollMetrics,
+                        colorScheme: colorScheme,
+                        onScrollFractionChange: { fraction in
+                            editorScrollRequest = EditorScrollRequest(fraction: fraction)
+                        }
+                    )
+                    .padding(.bottom, bottomNavHeight)
+                    .frame(width: 15)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 }
 
                 // Bottom nav
