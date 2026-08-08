@@ -307,56 +307,52 @@ struct FreewriteTextEditor: NSViewRepresentable {
     }
 }
 
-struct EditorEdgeScrollbar: View {
+struct NativeEditorEdgeScroller: NSViewRepresentable {
     let metrics: EditorScrollMetrics
     let colorScheme: ColorScheme
     let onScrollFractionChange: (CGFloat) -> Void
 
-    @State private var isHovering = false
+    final class Coordinator: NSObject {
+        let onScrollFractionChange: (CGFloat) -> Void
 
-    var body: some View {
-        GeometryReader { geometry in
-            let height = max(geometry.size.height, 1)
-            let thumbHeight = max(28, height * min(metrics.viewportHeight / metrics.contentHeight, 1))
-            let travel = max(height - thumbHeight, 1)
-            let thumbOffset = travel * metrics.offsetFraction
-            let thumbColor = Color.gray.opacity(colorScheme == .light ? (isHovering ? 0.55 : 0.38) : (isHovering ? 0.65 : 0.46))
-            let railColor = Color.gray.opacity(colorScheme == .light ? 0.08 : 0.14)
-
-            ZStack(alignment: .topTrailing) {
-                Rectangle()
-                    .fill(railColor)
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
-                    .padding(.trailing, 3)
-
-                RoundedRectangle(cornerRadius: 2.5)
-                    .fill(thumbColor)
-                    .frame(width: isHovering ? 6 : 5, height: thumbHeight)
-                    .offset(y: thumbOffset)
-                    .padding(.trailing, 1)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let proposedOffset = value.location.y - (thumbHeight / 2)
-                        onScrollFractionChange(proposedOffset / travel)
-                    }
-            )
-            .onHover { hovering in
-                isHovering = hovering
-                if hovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+        init(onScrollFractionChange: @escaping (CGFloat) -> Void) {
+            self.onScrollFractionChange = onScrollFractionChange
         }
-        .frame(width: 12)
-        .opacity(metrics.canScroll ? 1 : 0)
-        .allowsHitTesting(metrics.canScroll)
+
+        @objc func scrollerChanged(_ sender: NSScroller) {
+            onScrollFractionChange(CGFloat(sender.doubleValue))
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScrollFractionChange: onScrollFractionChange)
+    }
+
+    func makeNSView(context: Context) -> NSScroller {
+        let scroller = NSScroller()
+        scroller.scrollerStyle = .legacy
+        scroller.controlSize = .regular
+        scroller.target = context.coordinator
+        scroller.action = #selector(Coordinator.scrollerChanged(_:))
+        scroller.isEnabled = metrics.canScroll
+        scroller.isHidden = !metrics.canScroll
+        updateScroller(scroller)
+        return scroller
+    }
+
+    func updateNSView(_ scroller: NSScroller, context: Context) {
+        scroller.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        scroller.isEnabled = metrics.canScroll
+        scroller.isHidden = !metrics.canScroll
+        updateScroller(scroller)
+    }
+
+    private func updateScroller(_ scroller: NSScroller) {
+        let knobProportion = metrics.canScroll
+            ? min(max(metrics.viewportHeight / metrics.contentHeight, 0), 1)
+            : 1
+        scroller.knobProportion = knobProportion
+        scroller.doubleValue = Double(metrics.offsetFraction)
     }
 }
 
@@ -995,7 +991,7 @@ struct ContentView: View {
                             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
                         }
 
-                    EditorEdgeScrollbar(
+                    NativeEditorEdgeScroller(
                         metrics: editorScrollMetrics,
                         colorScheme: colorScheme,
                         onScrollFractionChange: { fraction in
@@ -1003,6 +999,7 @@ struct ContentView: View {
                         }
                     )
                     .padding(.bottom, bottomNavHeight)
+                    .frame(width: 15)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 }
 
