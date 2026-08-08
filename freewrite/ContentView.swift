@@ -78,6 +78,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
 
+    let editorID: UUID?
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -132,6 +133,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         context.coordinator.configureTextView(
             textView,
             text: text,
+            editorID: editorID,
             selectedFont: selectedFont,
             fontSize: fontSize,
             lineSpacing: lineSpacing,
@@ -160,6 +162,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.configureTextView(
                 textView,
                 text: text,
+                editorID: editorID,
                 selectedFont: selectedFont,
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
@@ -188,6 +191,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastConfiguredEditorID: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
@@ -197,11 +201,13 @@ struct FreewriteTextEditor: NSViewRepresentable {
         func configureTextView(
             _ textView: NSTextView,
             text: String,
+            editorID: UUID?,
             selectedFont: String,
             fontSize: CGFloat,
             lineSpacing: CGFloat,
             colorScheme: ColorScheme
         ) {
+            let editorChanged = lastConfiguredEditorID != editorID
             let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
             let textColor = colorScheme == .light
                 ? NSColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1.0)
@@ -222,6 +228,10 @@ struct FreewriteTextEditor: NSViewRepresentable {
             guard textView.string != text else {
                 textView.textColor = textColor
                 textView.font = font
+                if editorChanged {
+                    textView.undoManager?.removeAllActions()
+                    lastConfiguredEditorID = editorID
+                }
                 return
             }
 
@@ -231,6 +241,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             textView.undoManager?.removeAllActions()
             textView.selectedRanges = selectedRanges
             isUpdatingText = false
+            lastConfiguredEditorID = editorID
         }
 
         func startObservingBoundsChanges() {
@@ -959,6 +970,7 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
+                        editorID: selectedEntryId,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
