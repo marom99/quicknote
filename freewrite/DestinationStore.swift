@@ -11,7 +11,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
     }
 }
 
-enum DestinationAccessResult {
+enum DestinationAccessResult: Equatable {
     case accessible(URL)
     case softFailure
 }
@@ -88,6 +88,7 @@ final class DestinationStore: ObservableObject {
     @discardableResult
     func activateDestination(id: UUID, fileManager: FileManager = .default) -> DestinationAccessResult {
         guard destinations.contains(where: { $0.id == id }) else {
+            activeAccessFailed = true
             return .softFailure
         }
 

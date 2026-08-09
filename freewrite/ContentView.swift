@@ -1401,7 +1401,10 @@ struct ContentView: View {
             return
         }
 
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
+            print("Skipping save — active destination unavailable")
+            return
+        }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
