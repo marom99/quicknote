@@ -439,83 +439,103 @@ struct ContentView: View {
         _colorScheme = State(initialValue: savedScheme == "dark" ? .dark : .light)
     }
     
-    // Modify getDocumentsDirectory to use active destination
-    private func getDocumentsDirectory() -> URL {
+    // Active journal root; nil when the destination cannot be accessed (soft-fail).
+    private func getDocumentsDirectory() -> URL? {
+        destinationStore.resolvedDocumentsURL()
+    }
+
+    private func getVideosDirectory() -> URL? {
+        destinationStore.resolvedVideosURL()
+    }
+
+    private var activeDestinationHistoryLabel: String {
         if let url = destinationStore.resolvedDocumentsURL() {
-            return url
+            return url.path
         }
-        return DestinationStore.defaultFreewriteURL()
+        let name = destinationStore.activeDestination?.displayName ?? "Journal"
+        return "\(name) (unavailable)"
     }
 
-    private func getVideosDirectory() -> URL {
-        if let url = destinationStore.resolvedVideosURL() {
-            return url
-        }
-        return getDocumentsDirectory().appendingPathComponent("Videos", isDirectory: true)
-    }
-
-    private func getVideoEntryDirectory(for videoFilename: String) -> URL {
+    private func getVideoEntryDirectory(for videoFilename: String) -> URL? {
+        guard let videosDirectory = getVideosDirectory() else { return nil }
         let baseName = (videoFilename as NSString).deletingPathExtension
-        return getVideosDirectory().appendingPathComponent(baseName, isDirectory: true)
+        return videosDirectory.appendingPathComponent(baseName, isDirectory: true)
     }
 
-    private func getManagedVideoURL(for filename: String) -> URL {
-        getVideoEntryDirectory(for: filename).appendingPathComponent(filename)
+    private func getManagedVideoURL(for filename: String) -> URL? {
+        guard let directory = getVideoEntryDirectory(for: filename) else { return nil }
+        return directory.appendingPathComponent(filename)
     }
 
-    private func getVideoThumbnailURL(for filename: String) -> URL {
-        getVideoEntryDirectory(for: filename).appendingPathComponent("thumbnail.jpg")
+    private func getVideoThumbnailURL(for filename: String) -> URL? {
+        guard let directory = getVideoEntryDirectory(for: filename) else { return nil }
+        return directory.appendingPathComponent("thumbnail.jpg")
     }
 
-    private func getVideoTranscriptURL(for filename: String) -> URL {
-        getVideoEntryDirectory(for: filename).appendingPathComponent("transcript.md")
+    private func getVideoTranscriptURL(for filename: String) -> URL? {
+        guard let directory = getVideoEntryDirectory(for: filename) else { return nil }
+        return directory.appendingPathComponent("transcript.md")
     }
 
     @discardableResult
     private func ensureVideoEntryDirectoryExists(for videoFilename: String) throws -> URL {
-        let directory = getVideoEntryDirectory(for: videoFilename)
+        guard let directory = getVideoEntryDirectory(for: videoFilename) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
         if !fileManager.fileExists(atPath: directory.path) {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         }
         return directory
     }
 
-    private func getVideoURL(for filename: String) -> URL {
+    private func getVideoURL(for filename: String) -> URL? {
         // Current production layout: Videos/[entry-base]/[entry-filename].mov
-        let managedVideoURL = getManagedVideoURL(for: filename)
-        if fileManager.fileExists(atPath: managedVideoURL.path) {
+        if let managedVideoURL = getManagedVideoURL(for: filename),
+           fileManager.fileExists(atPath: managedVideoURL.path) {
             return managedVideoURL
         }
 
         // Backward compatibility: older builds stored videos flat under Videos/
-        let flatVideosURL = getVideosDirectory().appendingPathComponent(filename)
-        if fileManager.fileExists(atPath: flatVideosURL.path) {
-            return flatVideosURL
+        if let videosDirectory = getVideosDirectory() {
+            let flatVideosURL = videosDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: flatVideosURL.path) {
+                return flatVideosURL
+            }
         }
 
         // Backward compatibility: oldest builds stored videos in root Freewrite folder
-        let rootVideosURL = getDocumentsDirectory().appendingPathComponent(filename)
-        if fileManager.fileExists(atPath: rootVideosURL.path) {
-            return rootVideosURL
+        if let documentsDirectory = getDocumentsDirectory() {
+            let rootVideosURL = documentsDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: rootVideosURL.path) {
+                return rootVideosURL
+            }
         }
 
         // Default to managed path for newly created entries.
-        return managedVideoURL
+        return getManagedVideoURL(for: filename)
     }
 
     private func hasVideoAsset(for filename: String) -> Bool {
-        let managedVideoURL = getManagedVideoURL(for: filename)
-        if fileManager.fileExists(atPath: managedVideoURL.path) {
+        if let managedVideoURL = getManagedVideoURL(for: filename),
+           fileManager.fileExists(atPath: managedVideoURL.path) {
             return true
         }
 
-        let flatVideosURL = getVideosDirectory().appendingPathComponent(filename)
-        if fileManager.fileExists(atPath: flatVideosURL.path) {
-            return true
+        if let videosDirectory = getVideosDirectory() {
+            let flatVideosURL = videosDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: flatVideosURL.path) {
+                return true
+            }
         }
 
-        let rootVideosURL = getDocumentsDirectory().appendingPathComponent(filename)
-        return fileManager.fileExists(atPath: rootVideosURL.path)
+        if let documentsDirectory = getDocumentsDirectory() {
+            let rootVideosURL = documentsDirectory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: rootVideosURL.path) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private let historyDebugEnabled = true
@@ -572,7 +592,9 @@ struct ContentView: View {
             return cachedImage
         }
 
-        let thumbnailURL = getVideoThumbnailURL(for: videoFilename)
+        guard let thumbnailURL = getVideoThumbnailURL(for: videoFilename) else {
+            return nil
+        }
         if fileManager.fileExists(atPath: thumbnailURL.path),
            let image = NSImage(contentsOf: thumbnailURL) {
             thumbnailMemoryCache.setObject(image, forKey: cacheKey)
@@ -580,10 +602,11 @@ struct ContentView: View {
         }
 
         // Backward compatibility: generate once for old video entries, then persist.
-        let videoURL = getVideoURL(for: videoFilename)
-        guard fileManager.fileExists(atPath: videoURL.path),
+        guard let videoURL = getVideoURL(for: videoFilename),
+              fileManager.fileExists(atPath: videoURL.path),
               let generated = generateVideoThumbnail(from: videoURL) else {
-            historyDebug("THUMBNAIL MISS video=\(videoFilename) thumbnailPath=\(thumbnailURL.path) videoPath=\(videoURL.path)")
+            let videoPath = getVideoURL(for: videoFilename)?.path ?? "nil"
+            historyDebug("THUMBNAIL MISS video=\(videoFilename) thumbnailPath=\(thumbnailURL.path) videoPath=\(videoPath)")
             return nil
         }
         persistThumbnail(generated, for: videoFilename)
@@ -595,14 +618,21 @@ struct ContentView: View {
     private func deleteVideoAssets(for videoFilename: String) {
         thumbnailMemoryCache.removeObject(forKey: videoFilename as NSString)
 
-        let managedDirectory = getVideoEntryDirectory(for: videoFilename)
-        let managedVideoURL = managedDirectory.appendingPathComponent(videoFilename)
-        let managedThumbnailURL = managedDirectory.appendingPathComponent("thumbnail.jpg")
-        let managedTranscriptURL = managedDirectory.appendingPathComponent("transcript.md")
-        let flatVideosURL = getVideosDirectory().appendingPathComponent(videoFilename)
-        let rootVideosURL = getDocumentsDirectory().appendingPathComponent(videoFilename)
+        var candidateURLs: [URL] = []
+        var managedDirectory: URL?
+        if let directory = getVideoEntryDirectory(for: videoFilename) {
+            managedDirectory = directory
+            candidateURLs.append(directory.appendingPathComponent(videoFilename))
+            candidateURLs.append(directory.appendingPathComponent("thumbnail.jpg"))
+            candidateURLs.append(directory.appendingPathComponent("transcript.md"))
+        }
+        if let videosDirectory = getVideosDirectory() {
+            candidateURLs.append(videosDirectory.appendingPathComponent(videoFilename))
+        }
+        if let documentsDirectory = getDocumentsDirectory() {
+            candidateURLs.append(documentsDirectory.appendingPathComponent(videoFilename))
+        }
 
-        let candidateURLs = [managedVideoURL, managedThumbnailURL, managedTranscriptURL, flatVideosURL, rootVideosURL]
         for url in candidateURLs where fileManager.fileExists(atPath: url.path) {
             do {
                 try fileManager.removeItem(at: url)
@@ -611,7 +641,8 @@ struct ContentView: View {
             }
         }
 
-        if fileManager.fileExists(atPath: managedDirectory.path) {
+        if let managedDirectory,
+           fileManager.fileExists(atPath: managedDirectory.path) {
             do {
                 try fileManager.removeItem(at: managedDirectory)
             } catch {
@@ -621,8 +652,8 @@ struct ContentView: View {
     }
 
     private func loadTranscriptText(for videoFilename: String) -> String? {
-        let transcriptURL = getVideoTranscriptURL(for: videoFilename)
-        guard fileManager.fileExists(atPath: transcriptURL.path),
+        guard let transcriptURL = getVideoTranscriptURL(for: videoFilename),
+              fileManager.fileExists(atPath: transcriptURL.path),
               let content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
             return nil
         }
@@ -723,7 +754,7 @@ struct ContentView: View {
     
     // Add function to save text
     private func saveText() {
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent("entry.md")
         
         print("Attempting to save file to: \(fileURL.path)")
@@ -739,7 +770,7 @@ struct ContentView: View {
     
     // Add function to load text
     private func loadText() {
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent("entry.md")
         
         print("Attempting to load file from: \(fileURL.path)")
@@ -821,7 +852,9 @@ struct ContentView: View {
             return
         }
         print("Looking for entries in: \(documentsDirectory.path)")
-        print("Looking for videos in: \(getVideosDirectory().path)")
+        if let videosDirectory = getVideosDirectory() {
+            print("Looking for videos in: \(videosDirectory.path)")
+        }
         
         do {
             let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
@@ -1185,7 +1218,9 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     // Header
                     Button(action: {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: getDocumentsDirectory().path)
+                        if let path = getDocumentsDirectory()?.path {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+                        }
                     }) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -1197,7 +1232,7 @@ struct ContentView: View {
                                         .font(.system(size: 10))
                                         .foregroundColor(isHoveringHistory ? textHoverColor : textColor)
                                 }
-                                Text(getDocumentsDirectory().path)
+                                Text(activeDestinationHistoryLabel)
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
@@ -1375,7 +1410,7 @@ struct ContentView: View {
             return
         }
 
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
@@ -1420,11 +1455,11 @@ struct ContentView: View {
             let videoURL = getVideoURL(for: videoFilename)
             let thumbnailURL = getVideoThumbnailURL(for: videoFilename)
             let transcriptURL = getVideoTranscriptURL(for: videoFilename)
-            historyDebug("LOAD VIDEO \(debugEntrySummary(entry)) resolvedVideoPath=\(videoURL.path) videoExists=\(fileManager.fileExists(atPath: videoURL.path)) thumbnailPath=\(thumbnailURL.path) thumbnailExists=\(fileManager.fileExists(atPath: thumbnailURL.path))")
+            historyDebug("LOAD VIDEO \(debugEntrySummary(entry)) resolvedVideoPath=\(videoURL?.path ?? "nil") videoExists=\(videoURL.map { fileManager.fileExists(atPath: $0.path) } ?? false) thumbnailPath=\(thumbnailURL?.path ?? "nil") thumbnailExists=\(thumbnailURL.map { fileManager.fileExists(atPath: $0.path) } ?? false)")
             text = ""
             didCopyTranscript = false
-            selectedVideoHasTranscript = fileManager.fileExists(atPath: transcriptURL.path)
-            if fileManager.fileExists(atPath: videoURL.path) {
+            selectedVideoHasTranscript = transcriptURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+            if let videoURL, fileManager.fileExists(atPath: videoURL.path) {
                 currentVideoURL = videoURL
                 print("Successfully loaded video entry: \(videoFilename)")
             } else {
@@ -1436,7 +1471,10 @@ struct ContentView: View {
             currentVideoURL = nil
             selectedVideoHasTranscript = false
             didCopyTranscript = false
-            let documentsDirectory = getDocumentsDirectory()
+            guard let documentsDirectory = getDocumentsDirectory() else {
+                text = ""
+                return
+            }
             let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
             do {
@@ -1543,7 +1581,7 @@ struct ContentView: View {
 
     private func deleteEntry(entry: HumanEntry) {
         // Delete the file from the filesystem
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
         do {
