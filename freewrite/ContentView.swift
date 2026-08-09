@@ -757,6 +757,16 @@ struct ContentView: View {
         }
     }
     
+    private func reloadJournalForActiveDestination() {
+        selectedEntryId = nil
+        currentVideoURL = nil
+        selectedVideoHasTranscript = false
+        didCopyTranscript = false
+        thumbnailMemoryCache.removeAllObjects()
+        text = ""
+        loadExistingEntries()
+    }
+
     private func switchToDestination(id: UUID) {
         guard id != destinationStore.activeDestinationId else { return }
 
@@ -767,13 +777,7 @@ struct ContentView: View {
         }
 
         destinationStore.activateDestination(id: id)
-        selectedEntryId = nil
-        currentVideoURL = nil
-        selectedVideoHasTranscript = false
-        didCopyTranscript = false
-        thumbnailMemoryCache.removeAllObjects()
-        text = ""
-        loadExistingEntries()
+        reloadJournalForActiveDestination()
     }
 
     private func addDestinationFromFolderPicker() {
@@ -788,13 +792,7 @@ struct ContentView: View {
 
         do {
             _ = try destinationStore.addDestination(from: url, activate: true)
-            selectedEntryId = nil
-            currentVideoURL = nil
-            selectedVideoHasTranscript = false
-            didCopyTranscript = false
-            thumbnailMemoryCache.removeAllObjects()
-            text = ""
-            loadExistingEntries()
+            reloadJournalForActiveDestination()
         } catch {
             print("Error adding destination: \(error)")
         }
