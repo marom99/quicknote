@@ -369,6 +369,7 @@ struct NativeEditorEdgeScroller: NSViewRepresentable {
 }
 
 struct ContentView: View {
+    @StateObject private var destinationStore = DestinationStore()
     @State private var entries: [HumanEntry] = []
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
     
@@ -392,6 +393,9 @@ struct ContentView: View {
     @State private var isHoveringHistoryPath = false
     @State private var isHoveringHistoryArrow = false
     @State private var isHoveringCopyTranscript = false
+    @State private var isHoveringDestinationChip = false
+    @State private var renameDestinationId: UUID? = nil
+    @State private var renameDisplayName: String = ""
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -421,40 +425,6 @@ struct ContentView: View {
     // Add file manager and save timer
     private let fileManager = FileManager.default
     private let saveTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-    
-    // Add cached documents directory
-    private let documentsDirectory: URL = {
-        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Freewrite")
-        
-        // Create Freewrite directory if it doesn't exist
-        if !FileManager.default.fileExists(atPath: directory.path) {
-            do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                print("Successfully created Freewrite directory")
-            } catch {
-                print("Error creating directory: \(error)")
-            }
-        }
-        
-        return directory
-    }()
-
-    private let videosDirectory: URL = {
-        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Freewrite")
-            .appendingPathComponent("Videos")
-
-        if !FileManager.default.fileExists(atPath: directory.path) {
-            do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                print("Successfully created Freewrite/Videos directory")
-            } catch {
-                print("Error creating videos directory: \(error)")
-            }
-        }
-
-        return directory
-    }()
 
     private let thumbnailMemoryCache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
@@ -469,13 +439,19 @@ struct ContentView: View {
         _colorScheme = State(initialValue: savedScheme == "dark" ? .dark : .light)
     }
     
-    // Modify getDocumentsDirectory to use cached value
+    // Modify getDocumentsDirectory to use active destination
     private func getDocumentsDirectory() -> URL {
-        return documentsDirectory
+        if let url = destinationStore.resolvedDocumentsURL() {
+            return url
+        }
+        return DestinationStore.defaultFreewriteURL()
     }
 
     private func getVideosDirectory() -> URL {
-        return videosDirectory
+        if let url = destinationStore.resolvedVideosURL() {
+            return url
+        }
+        return getDocumentsDirectory().appendingPathComponent("Videos", isDirectory: true)
     }
 
     private func getVideoEntryDirectory(for videoFilename: String) -> URL {
@@ -781,9 +757,71 @@ struct ContentView: View {
         }
     }
     
+    private func switchToDestination(id: UUID) {
+        guard id != destinationStore.activeDestinationId else { return }
+
+        if let currentId = selectedEntryId,
+           let currentEntry = entries.first(where: { $0.id == currentId }),
+           currentEntry.entryType == .text {
+            saveEntry(entry: currentEntry)
+        }
+
+        destinationStore.activateDestination(id: id)
+        selectedEntryId = nil
+        currentVideoURL = nil
+        selectedVideoHasTranscript = false
+        didCopyTranscript = false
+        thumbnailMemoryCache.removeAllObjects()
+        text = ""
+        loadExistingEntries()
+    }
+
+    private func addDestinationFromFolderPicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose Folder"
+        panel.message = "Choose a folder for this journal destination."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            _ = try destinationStore.addDestination(from: url, activate: true)
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            thumbnailMemoryCache.removeAllObjects()
+            text = ""
+            loadExistingEntries()
+        } catch {
+            print("Error adding destination: \(error)")
+        }
+    }
+
+    private func commitRenameDestination() {
+        guard let id = renameDestinationId else { return }
+        destinationStore.renameDestination(id: id, displayName: renameDisplayName)
+        renameDestinationId = nil
+    }
+
+    private var activeDestinationDisplayName: String {
+        destinationStore.activeDestination?.displayName ?? "Freewrite"
+    }
+
     // Add function to load existing entries
     private func loadExistingEntries() {
-        let documentsDirectory = getDocumentsDirectory()
+        guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
+            print("Active destination is unavailable; showing empty History")
+            entries = []
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            text = ""
+            return
+        }
         print("Looking for entries in: \(documentsDirectory.path)")
         print("Looking for videos in: \(getVideosDirectory().path)")
         
@@ -1020,8 +1058,10 @@ struct ContentView: View {
                 VStack {
                     Spacer()
                     HStack {
-                        if isViewingVideoEntry {
-                            HStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            destinationChip(textColor: textColor, textHoverColor: textHoverColor)
+
+                            if isViewingVideoEntry {
                                 if selectedVideoHasTranscript {
                                     Button(action: {
                                         copyTranscriptForSelectedVideoEntry()
@@ -1042,11 +1082,11 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                            .onHover { hovering in
-                                isHoveringBottomNav = hovering
-                            }
                         }
-                        
+                        .onHover { hovering in
+                            isHoveringBottomNav = hovering
+                        }
+
                         Spacer()
                         
                         // Utility buttons (moved to right)
@@ -1305,6 +1345,7 @@ struct ContentView: View {
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
+            destinationStore.activateDestination(id: destinationStore.activeDestinationId)
             loadExistingEntries()
         }
         .onChange(of: text) { _ in
@@ -1426,7 +1467,79 @@ struct ContentView: View {
         // Save the empty entry
         saveEntry(entry: newEntry)
     }
-    
+
+    @ViewBuilder
+    private func destinationChip(textColor: Color, textHoverColor: Color) -> some View {
+        Menu {
+            ForEach(destinationStore.destinations) { destination in
+                Button {
+                    switchToDestination(id: destination.id)
+                } label: {
+                    HStack {
+                        Text(destination.displayName)
+                        Spacer()
+                        if destination.id == destinationStore.activeDestinationId {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+                Button("Rename…") {
+                    renameDestinationId = destination.id
+                    renameDisplayName = destination.displayName
+                }
+            }
+            Divider()
+            Button("Add destination…") {
+                addDestinationFromFolderPicker()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "folder")
+                    .font(.system(size: 12))
+                Text(activeDestinationDisplayName)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+            }
+            .foregroundColor(isHoveringDestinationChip ? textHoverColor : textColor)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .onHover { hovering in
+            isHoveringDestinationChip = hovering
+            isHoveringBottomNav = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .popover(isPresented: Binding(
+            get: { renameDestinationId != nil },
+            set: { if !$0 { renameDestinationId = nil } }
+        )) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Rename destination")
+                    .font(.system(size: 13, weight: .medium))
+                TextField("Display name", text: $renameDisplayName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 220)
+                HStack {
+                    Button("Cancel") {
+                        renameDestinationId = nil
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Button("Save") {
+                        commitRenameDestination()
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
+        }
+    }
+
     private func deleteEntry(entry: HumanEntry) {
         // Delete the file from the filesystem
         let documentsDirectory = getDocumentsDirectory()
