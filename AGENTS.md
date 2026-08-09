@@ -50,7 +50,7 @@ Freewrite is a **distraction-free writing environment** for macOS designed aroun
 
 ## Overview
 
-Freewrite is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally in `~/Documents/Freewrite/`.
+Freewrite is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Freewrite/`, and writers can add additional named destinations pointing at other folders.
 
 ## Architecture
 
@@ -98,7 +98,17 @@ struct HumanEntry: Identifiable {
 
 ### File Storage
 
-**Location**: `~/Documents/Freewrite/`
+**Default location**: `~/Documents/Freewrite/` (always available as the first named destination)
+
+**Named save destinations**:
+- Writers pick additional journal folders via the bottom-left destination menu (`Add destination…`).
+- Each destination has a display name (defaults to the folder name) and an optional security-scoped bookmark for user-picked paths.
+- The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
+- Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
+- `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; `ContentView` wires the chip/menu UI and journal reload on switch.
+- Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
+
+**Location** (active destination root):
 
 **Text Entries**:
 - Format: Markdown (.md)
@@ -109,8 +119,8 @@ struct HumanEntry: Identifiable {
 **Video Entries**:
 - Format: QuickTime Movie (.mov)
 - Naming: `[UUID]-[YYYY-MM-DD-HH-mm-ss].mov`
-- Metadata: Corresponding `.md` file with "Video Entry" text in `~/Documents/Freewrite/`
-- Storage layout: `~/Documents/Freewrite/Videos/[UUID]-[YYYY-MM-DD-HH-mm-ss]/`
+- Metadata: Corresponding `.md` file with "Video Entry" text in the active destination root
+- Storage layout: `[active-destination]/Videos/[UUID]-[YYYY-MM-DD-HH-mm-ss]/`
 - Directory contents:
   - `[UUID]-[YYYY-MM-DD-HH-mm-ss].mov`
   - `thumbnail.jpg`
@@ -323,6 +333,8 @@ Required entitlements in `freewrite.entitlements`:
 <key>com.apple.security.app-sandbox</key>
 <true/>
 <key>com.apple.security.files.user-selected.read-write</key>
+<true/>
+<key>com.apple.security.files.bookmarks.app-scope</key>
 <true/>
 <key>com.apple.security.device.camera</key>
 <true/>
