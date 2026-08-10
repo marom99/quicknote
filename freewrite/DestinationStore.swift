@@ -23,9 +23,12 @@ final class DestinationStore: ObservableObject {
     @Published private(set) var destinations: [SaveDestination]
     @Published private(set) var activeDestinationId: UUID
     @Published private(set) var activeAccessFailed: Bool = false
+    /// Path string for UI labels — avoids resolving bookmarks during view updates.
+    @Published private(set) var activeDocumentsPath: String?
 
     private let userDefaults: UserDefaults
     private var scopedURL: URL?
+    private var cachedDocumentsURL: URL?
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -48,11 +51,17 @@ final class DestinationStore: ObservableObject {
     }
 
     func resolvedDocumentsURL(fileManager: FileManager = .default) -> URL? {
+        if let cachedDocumentsURL {
+            ensureDirectoryExists(at: cachedDocumentsURL, fileManager: fileManager)
+            return cachedDocumentsURL
+        }
+
         switch resolveActiveAccess(fileManager: fileManager) {
         case .accessible(let url):
-            ensureDirectoryExists(at: url, fileManager: fileManager)
+            cacheAccessibleURL(url, fileManager: fileManager)
             return url
         case .softFailure:
+            clearCachedAccess(failed: true)
             return nil
         }
     }
@@ -67,6 +76,11 @@ final class DestinationStore: ObservableObject {
     }
 
     func resolveDocumentsURL(for destination: SaveDestination, fileManager: FileManager = .default) -> URL? {
+        if destination.id == activeDestinationId, let cachedDocumentsURL {
+            ensureDirectoryExists(at: cachedDocumentsURL, fileManager: fileManager)
+            return cachedDocumentsURL
+        }
+
         switch resolveAccess(for: destination, fileManager: fileManager) {
         case .accessible(let url):
             ensureDirectoryExists(at: url, fileManager: fileManager)
@@ -88,24 +102,44 @@ final class DestinationStore: ObservableObject {
     @discardableResult
     func activateDestination(id: UUID, fileManager: FileManager = .default) -> DestinationAccessResult {
         guard destinations.contains(where: { $0.id == id }) else {
-            activeAccessFailed = true
+            clearCachedAccess(failed: true)
             return .softFailure
         }
 
         stopAccessingCurrentScope()
+        cachedDocumentsURL = nil
+        activeDocumentsPath = nil
         activeDestinationId = id
         userDefaults.set(id.uuidString, forKey: Self.activeDestinationIdKey)
+
         let access = resolveActiveAccess(fileManager: fileManager)
-        activeAccessFailed = access == .softFailure
+        switch access {
+        case .accessible(let url):
+            cacheAccessibleURL(url, fileManager: fileManager)
+        case .softFailure:
+            clearCachedAccess(failed: true)
+        }
         return access
     }
 
     func addDestination(from pickedURL: URL, activate: Bool = true, fileManager: FileManager = .default) throws -> SaveDestination {
-        let bookmarkData = try pickedURL.bookmarkData(
-            options: [.withSecurityScope],
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
+        let accessStarted = pickedURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessStarted {
+                pickedURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let bookmarkData: Data
+        do {
+            bookmarkData = try pickedURL.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        } catch {
+            throw error
+        }
 
         let displayName = pickedURL.lastPathComponent
         let destination = SaveDestination(
@@ -118,7 +152,7 @@ final class DestinationStore: ObservableObject {
         persistDestinations()
 
         if activate {
-            activateDestination(id: destination.id, fileManager: fileManager)
+            _ = activateDestination(id: destination.id, fileManager: fileManager)
         }
 
         return destination
@@ -139,6 +173,27 @@ final class DestinationStore: ObservableObject {
         }
     }
 
+    private func cacheAccessibleURL(_ url: URL, fileManager: FileManager) {
+        ensureDirectoryExists(at: url, fileManager: fileManager)
+        cachedDocumentsURL = url
+        if activeDocumentsPath != url.path {
+            activeDocumentsPath = url.path
+        }
+        if activeAccessFailed {
+            activeAccessFailed = false
+        }
+    }
+
+    private func clearCachedAccess(failed: Bool) {
+        cachedDocumentsURL = nil
+        if activeDocumentsPath != nil {
+            activeDocumentsPath = nil
+        }
+        if activeAccessFailed != failed {
+            activeAccessFailed = failed
+        }
+    }
+
     private func resolveActiveAccess(fileManager: FileManager = .default) -> DestinationAccessResult {
         guard let destination = activeDestination else {
             return .softFailure
@@ -150,12 +205,10 @@ final class DestinationStore: ObservableObject {
         if destination.isDefault {
             let url = Self.defaultFreewriteURL(fileManager: fileManager)
             scopedURL = nil
-            activeAccessFailed = false
             return .accessible(url)
         }
 
         guard let bookmarkData = destination.bookmarkData else {
-            activeAccessFailed = true
             return .softFailure
         }
 
@@ -180,19 +233,17 @@ final class DestinationStore: ObservableObject {
                 }
             }
 
-            if scopedURL != url {
+            if scopedURL?.standardizedFileURL.path != url.standardizedFileURL.path {
                 stopAccessingCurrentScope()
-                guard url.startAccessingSecurityScopedResource() else {
-                    activeAccessFailed = true
+                let started = url.startAccessingSecurityScopedResource()
+                guard started else {
                     return .softFailure
                 }
                 scopedURL = url
             }
 
-            activeAccessFailed = false
             return .accessible(url)
         } catch {
-            activeAccessFailed = true
             return .softFailure
         }
     }
