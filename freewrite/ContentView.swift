@@ -225,13 +225,10 @@ struct FreewriteTextEditor: NSViewRepresentable {
             textView.defaultParagraphStyle = paragraphStyle
             textView.insertionPointColor = textColor
 
-            guard textView.string != text else {
+            let shouldReplaceText = editorChanged || textView.string != text
+            guard shouldReplaceText else {
                 textView.textColor = textColor
                 textView.font = font
-                if editorChanged {
-                    textView.undoManager?.removeAllActions()
-                    lastConfiguredEditorID = editorID
-                }
                 return
             }
 
@@ -382,6 +379,7 @@ struct ContentView: View {
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var selectedEntryId: UUID? = nil
+    @State private var isLoadingEntry = false
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var hoveredTrashId: UUID? = nil
@@ -449,8 +447,8 @@ struct ContentView: View {
     }
 
     private var activeDestinationHistoryLabel: String {
-        if let url = destinationStore.resolvedDocumentsURL() {
-            return url.path
+        if let path = destinationStore.activeDocumentsPath {
+            return path
         }
         let name = destinationStore.activeDestination?.displayName ?? "Journal"
         return "\(name) (unavailable)"
@@ -538,28 +536,6 @@ struct ContentView: View {
         return false
     }
 
-    private let historyDebugEnabled = true
-
-    private func historyDebug(_ message: String) {
-        guard historyDebugEnabled else { return }
-        print("[HistoryDebug] \(message)")
-    }
-
-    private func debugEntrySummary(_ entry: HumanEntry) -> String {
-        let shortID = String(entry.id.uuidString.prefix(8))
-        let type = entry.entryType == .video ? "video" : "text"
-        let videoFilename = resolvedVideoFilename(for: entry) ?? "-"
-        return "id=\(shortID) type=\(type) file=\(entry.filename) video=\(videoFilename)"
-    }
-
-    private func logEntriesOrder(_ reason: String, limit: Int = 20) {
-        guard historyDebugEnabled else { return }
-        historyDebug("ORDER SNAPSHOT (\(reason)) total=\(entries.count) selected=\(selectedEntryId?.uuidString ?? "nil")")
-        for (index, entry) in entries.prefix(limit).enumerated() {
-            historyDebug("#\(index + 1) \(debugEntrySummary(entry))")
-        }
-    }
-
     private func resolvedVideoFilename(for entry: HumanEntry) -> String? {
         guard entry.entryType == .video else {
             return nil
@@ -605,13 +581,10 @@ struct ContentView: View {
         guard let videoURL = getVideoURL(for: videoFilename),
               fileManager.fileExists(atPath: videoURL.path),
               let generated = generateVideoThumbnail(from: videoURL) else {
-            let videoPath = getVideoURL(for: videoFilename)?.path ?? "nil"
-            historyDebug("THUMBNAIL MISS video=\(videoFilename) thumbnailPath=\(thumbnailURL.path) videoPath=\(videoPath)")
             return nil
         }
         persistThumbnail(generated, for: videoFilename)
         thumbnailMemoryCache.setObject(generated, forKey: cacheKey)
-        historyDebug("THUMBNAIL GENERATED video=\(videoFilename) thumbnailPath=\(thumbnailURL.path)")
         return generated
     }
 
@@ -788,6 +761,31 @@ struct ContentView: View {
         }
     }
     
+    private func selectEntry(_ entry: HumanEntry) {
+        guard selectedEntryId != entry.id else { return }
+
+        if let currentId = selectedEntryId,
+           let currentEntry = entries.first(where: { $0.id == currentId }),
+           currentEntry.entryType == .text {
+            saveEntry(entry: currentEntry, updatePreview: false)
+        }
+
+        guard let targetEntry = entries.first(where: { $0.id == entry.id }) else {
+            return
+        }
+
+        isLoadingEntry = true
+        loadEntry(entry: targetEntry)
+        selectedEntryId = targetEntry.id
+        isLoadingEntry = false
+
+        if targetEntry.entryType == .text {
+            DispatchQueue.main.async {
+                self.updatePreviewText(for: targetEntry)
+            }
+        }
+    }
+
     private func reloadJournalForActiveDestination() {
         selectedEntryId = nil
         currentVideoURL = nil
@@ -808,18 +806,36 @@ struct ContentView: View {
         }
 
         destinationStore.activateDestination(id: id)
-        reloadJournalForActiveDestination()
+        // Defer journal reload so ForEach(entries) isn't mid-update when History is open.
+        DispatchQueue.main.async {
+            self.reloadJournalForActiveDestination()
+        }
+    }
+
+    private func revealActiveDestinationInFinder() {
+        guard let url = destinationStore.resolvedDocumentsURL() else { return }
+        // Use the security-scoped URL directly. Path-based selectFile can crash/fail
+        // for user-picked destinations outside the app container.
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private func addDestinationFromFolderPicker() {
+        // AppKit restores NSOSPLastRootDirectory when the panel opens. That
+        // bookmark often isn't a valid security-scoped bookmark and surfaces as
+        // NSCocoaErrorDomain 256 — "The file couldn’t be opened."
+        UserDefaults.standard.removeObject(forKey: "NSOSPLastRootDirectory")
+
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
         panel.prompt = "Choose Folder"
         panel.message = "Choose a folder for this journal destination."
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else { return }
 
         do {
             _ = try destinationStore.addDestination(from: url, activate: true)
@@ -937,7 +953,6 @@ struct ContentView: View {
 
             // Now assign to the state variable
             entries = loadedEntries
-            logEntriesOrder("loadExistingEntries")
 
             // Never open directly into video on startup; create a fresh text entry instead.
             if let latestEntry = entries.first, latestEntry.entryType == .video {
@@ -1034,6 +1049,8 @@ struct ContentView: View {
                         .id(videoURL.path)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea(edges: .top)
+                        // Avoid animating AVKit/AppKit representables when History opens.
+                        .transaction { $0.animation = nil }
                 } else {
                     // Show text editor for text entries
                     FreewriteTextEditor(
@@ -1069,6 +1086,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
                         .colorScheme(colorScheme)
+                        .transaction { $0.animation = nil }
                         .onAppear {
                             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
                         }
@@ -1083,6 +1101,7 @@ struct ContentView: View {
                     .padding(.bottom, bottomNavHeight)
                     .frame(width: 15)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .transaction { $0.animation = nil }
                 }
 
                 // Bottom nav
@@ -1218,9 +1237,7 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     // Header
                     Button(action: {
-                        if let path = getDocumentsDirectory()?.path {
-                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
-                        }
+                        revealActiveDestinationInFinder()
                     }) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -1253,111 +1270,88 @@ struct ContentView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(entries) { entry in
-                                Button(action: {
-                                    if selectedEntryId != entry.id {
-                                        historyDebug("ROW TAP \(debugEntrySummary(entry))")
-                                        // Save current entry before switching
-                                        if let currentId = selectedEntryId,
-                                           let currentEntry = entries.first(where: { $0.id == currentId }),
-                                           currentEntry.entryType == .text {
-                                            saveEntry(entry: currentEntry)
-                                        }
-
-                                        // Re-resolve from source of truth after any state mutations.
-                                        guard let targetEntry = entries.first(where: { $0.id == entry.id }) else {
-                                            historyDebug("ROW TAP target missing id=\(entry.id.uuidString)")
-                                            return
-                                        }
-                                        selectedEntryId = targetEntry.id
-                                        historyDebug("ROW TAP resolved target \(debugEntrySummary(targetEntry))")
-                                        loadEntry(entry: targetEntry)
-                                    }
-                                }) {
-                                    HStack(alignment: .top) {
-                                        // Show video thumbnail for video entries
-                                        if let videoFilename = resolvedVideoFilename(for: entry) {
-                                            if let thumbnail = loadThumbnailImage(for: videoFilename) {
-                                                Image(nsImage: thumbnail)
-                                                    .resizable()
-                                                    .aspectRatio(contentMode: .fill)
+                                HStack(alignment: .top) {
+                                    // Show video thumbnail for video entries
+                                    if let videoFilename = resolvedVideoFilename(for: entry) {
+                                        if let thumbnail = loadThumbnailImage(for: videoFilename) {
+                                            Image(nsImage: thumbnail)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 40, height: 40)
+                                                .cornerRadius(4)
+                                                .overlay(
+                                                    Image(systemName: "play.circle.fill")
+                                                        .foregroundColor(.white)
+                                                        .font(.system(size: 16))
+                                                )
+                                        } else {
+                                            // Fallback if thumbnail generation fails
+                                            ZStack {
+                                                Rectangle()
+                                                    .fill(Color.gray.opacity(0.3))
                                                     .frame(width: 40, height: 40)
                                                     .cornerRadius(4)
-                                                    .overlay(
-                                                        Image(systemName: "play.circle.fill")
-                                                            .foregroundColor(.white)
-                                                            .font(.system(size: 16))
-                                                    )
-                                            } else {
-                                                // Fallback if thumbnail generation fails
-                                                ZStack {
-                                                    Rectangle()
-                                                        .fill(Color.gray.opacity(0.3))
-                                                        .frame(width: 40, height: 40)
-                                                        .cornerRadius(4)
-                                                    Image(systemName: "video.fill")
-                                                        .foregroundColor(.gray)
-                                                        .font(.system(size: 16))
-                                                }
+                                                Image(systemName: "video.fill")
+                                                    .foregroundColor(.gray)
+                                                    .font(.system(size: 16))
                                             }
-                                        }
-
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text(entry.previewText)
-                                                    .font(.system(size: 13))
-                                                    .lineLimit(1)
-                                                    .foregroundColor(.primary)
-
-                                                Spacer()
-                                                
-                                                // Trash icon that appears on hover
-                                                if hoveredEntryId == entry.id {
-                                                    Button(action: {
-                                                        deleteEntry(entry: entry)
-                                                    }) {
-                                                        Image(systemName: "trash")
-                                                            .font(.system(size: 11))
-                                                            .foregroundColor(hoveredTrashId == entry.id ? .red : .gray)
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                    .onHover { hovering in
-                                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                                            hoveredTrashId = hovering ? entry.id : nil
-                                                        }
-                                                        if hovering {
-                                                            NSCursor.pointingHand.push()
-                                                        } else {
-                                                            NSCursor.pop()
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            
-                                            Text(entry.date)
-                                                .font(.system(size: 12))
-                                                .foregroundColor(.secondary)
                                         }
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(backgroundColor(for: entry))
-                                    )
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(entry.previewText)
+                                                .font(.system(size: 13))
+                                                .lineLimit(1)
+                                                .foregroundColor(.primary)
+
+                                            Spacer()
+                                        }
+
+                                        Text(entry.date)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
-                                .buttonStyle(PlainButtonStyle())
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(backgroundColor(for: entry))
+                                )
                                 .contentShape(Rectangle())
-                                .onHover { hovering in
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        hoveredEntryId = hovering ? entry.id : nil
+                                .onTapGesture {
+                                    selectEntry(entry)
+                                }
+                                .overlay(alignment: .trailing) {
+                                    if hoveredEntryId == entry.id {
+                                        Button(action: {
+                                            deleteEntry(entry: entry)
+                                        }) {
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(hoveredTrashId == entry.id ? .red : .gray)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .onHover { hovering in
+                                            hoveredTrashId = hovering ? entry.id : nil
+                                            if hovering {
+                                                NSCursor.pointingHand.push()
+                                            } else {
+                                                NSCursor.pop()
+                                            }
+                                        }
+                                        .padding(.trailing, 8)
                                     }
                                 }
-                                .onAppear {
-                                    NSCursor.pop()  // Reset cursor when button appears
+                                .onHover { hovering in
+                                    hoveredEntryId = hovering ? entry.id : nil
                                 }
-                                .help("Click to select this entry")  // Add tooltip
-                                
+                                .help("Click to select this entry")
+
                                 if entry.id != entries.last?.id {
                                     Divider()
                                 }
@@ -1368,11 +1362,13 @@ struct ContentView: View {
                 }
                 .frame(width: 200)
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
+                .transition(.move(edge: .trailing))
             }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
         // and top inset + bottom nav need leftover vertical room to write.
         .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
+        // Animate only sidebar insertion; AppKit editor is excluded via .transaction above.
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .preferredColorScheme(colorScheme)
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
@@ -1382,6 +1378,7 @@ struct ContentView: View {
             loadExistingEntries()
         }
         .onChange(of: text) { _ in
+            guard !isLoadingEntry else { return }
             // Save current entry when text changes
             if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
@@ -1429,7 +1426,7 @@ struct ContentView: View {
         }
     }
     
-    private func saveEntry(entry: HumanEntry) {
+    private func saveEntry(entry: HumanEntry, updatePreview: Bool = true) {
         guard entry.entryType == .text else {
             return
         }
@@ -1443,7 +1440,9 @@ struct ContentView: View {
         do {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
             print("Successfully saved entry: \(entry.filename)")
-            updatePreviewText(for: entry)  // Update preview after saving
+            if updatePreview {
+                updatePreviewText(for: entry)
+            }
         } catch {
             print("Error saving entry: \(error)")
         }
@@ -1453,9 +1452,7 @@ struct ContentView: View {
         if let videoFilename = resolvedVideoFilename(for: entry) {
             // Load video entry
             let videoURL = getVideoURL(for: videoFilename)
-            let thumbnailURL = getVideoThumbnailURL(for: videoFilename)
             let transcriptURL = getVideoTranscriptURL(for: videoFilename)
-            historyDebug("LOAD VIDEO \(debugEntrySummary(entry)) resolvedVideoPath=\(videoURL?.path ?? "nil") videoExists=\(videoURL.map { fileManager.fileExists(atPath: $0.path) } ?? false) thumbnailPath=\(thumbnailURL?.path ?? "nil") thumbnailExists=\(thumbnailURL.map { fileManager.fileExists(atPath: $0.path) } ?? false)")
             text = ""
             didCopyTranscript = false
             selectedVideoHasTranscript = transcriptURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
@@ -1467,7 +1464,6 @@ struct ContentView: View {
             }
         } else {
             // Load text entry
-            historyDebug("LOAD TEXT \(debugEntrySummary(entry))")
             currentVideoURL = nil
             selectedVideoHasTranscript = false
             didCopyTranscript = false
@@ -1497,9 +1493,6 @@ struct ContentView: View {
         currentVideoURL = nil
         selectedVideoHasTranscript = false
         didCopyTranscript = false
-        historyDebug("NEW ENTRY created \(debugEntrySummary(newEntry))")
-        logEntriesOrder("createNewEntry")
-
         text = ""
         // Randomize placeholder text for new entry
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
@@ -1529,7 +1522,12 @@ struct ContentView: View {
             }
             Divider()
             Button("Add destination…") {
-                addDestinationFromFolderPicker()
+                // Dismiss the SwiftUI Menu before presenting NSOpenPanel.
+                // Presenting the panel synchronously from a Menu action can race
+                // AppKit's open-panel restore and show "The file couldn’t be opened."
+                DispatchQueue.main.async {
+                    addDestinationFromFolderPicker()
+                }
             }
         } label: {
             HStack(spacing: 4) {
@@ -1597,8 +1595,6 @@ struct ContentView: View {
             // Remove the entry from the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries.remove(at: index)
-                historyDebug("DELETE ENTRY removed \(debugEntrySummary(entry))")
-                logEntriesOrder("deleteEntry")
 
                 // If the deleted entry was selected, select the first entry or create a new one
                 if selectedEntryId == entry.id {
