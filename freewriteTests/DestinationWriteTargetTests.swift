@@ -161,6 +161,31 @@ struct DestinationWriteTargetTests {
         #expect(resolved == nil)
     }
 
+    @Test func resolveExistingMissingFileDoesNotCreate() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("freewrite-existing-missing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let destination = SaveDestination(
+            id: UUID(),
+            displayName: "Test",
+            isDefault: false,
+            saveMode: .existing,
+            existingNoteFilename: "gone.md"
+        )
+        let resolved = DestinationWriteTarget.resolve(
+            for: destination,
+            documentsURL: tempDir,
+            createIfMissing: false
+        )
+        #expect(resolved != nil)
+        #expect(resolved?.filename == "gone.md")
+        #expect(resolved?.fileExists == false)
+        #expect(resolved?.didCreate == false)
+        #expect(!FileManager.default.fileExists(atPath: resolved!.fileURL.path))
+    }
+
     @Test func newNoteResolveReturnsNil() {
         let destination = SaveDestination.makeDefault()
         let resolved = DestinationWriteTarget.resolve(
