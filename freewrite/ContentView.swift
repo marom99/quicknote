@@ -394,8 +394,6 @@ struct ContentView: View {
     @State private var isHoveringHistoryArrow = false
     @State private var isHoveringCopyTranscript = false
     @State private var isHoveringDestinationChip = false
-    @State private var renameDestinationId: UUID? = nil
-    @State private var renameDisplayName: String = ""
     @State private var settingsDisplayName: String = ""
     @State private var settingsFilenameFormat: String = RollingPeriod.daily.defaultFilenameFormat
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
@@ -1066,12 +1064,6 @@ struct ContentView: View {
         }
     }
 
-    private func commitRenameDestination() {
-        guard let id = renameDestinationId else { return }
-        destinationStore.renameDestination(id: id, displayName: renameDisplayName)
-        renameDestinationId = nil
-    }
-
     private var activeDestinationDisplayName: String {
         destinationStore.activeDestination?.displayName ?? "Freewrite"
     }
@@ -1734,10 +1726,6 @@ struct ContentView: View {
                         }
                     }
                 }
-                Button("Rename…") {
-                    renameDestinationId = destination.id
-                    renameDisplayName = destination.displayName
-                }
             }
             Divider()
             Button("Destination settings…") {
@@ -1771,31 +1759,6 @@ struct ContentView: View {
             } else {
                 NSCursor.pop()
             }
-        }
-        .popover(isPresented: Binding(
-            get: { renameDestinationId != nil },
-            set: { if !$0 { renameDestinationId = nil } }
-        )) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Rename destination")
-                    .font(.system(size: 13, weight: .medium))
-                TextField("Display name", text: $renameDisplayName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220)
-                HStack {
-                    Button("Cancel") {
-                        renameDestinationId = nil
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                    Button("Save") {
-                        commitRenameDestination()
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(16)
-            .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
         }
     }
 
