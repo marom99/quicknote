@@ -1,13 +1,110 @@
 import Foundation
 
+enum DestinationSaveMode: String, Codable, Equatable, CaseIterable {
+    case newNote
+    case rolling
+    case existing
+
+    var displayName: String {
+        switch self {
+        case .newNote: return "New note"
+        case .rolling: return "Rolling"
+        case .existing: return "Existing note"
+        }
+    }
+}
+
+enum RollingPeriod: String, Codable, Equatable, CaseIterable {
+    case daily
+    case weekly
+    case monthly
+
+    var displayName: String {
+        switch self {
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        }
+    }
+
+    var defaultFilenameFormat: String {
+        switch self {
+        case .daily: return "yyyy-MM-dd"
+        case .weekly: return "yyyy-'W'ww"
+        case .monthly: return "yyyy-MM"
+        }
+    }
+}
+
 struct SaveDestination: Identifiable, Codable, Equatable {
     let id: UUID
     var displayName: String
     var bookmarkData: Data?
     var isDefault: Bool
+    var saveMode: DestinationSaveMode
+    var rollingPeriod: RollingPeriod
+    var filenameFormat: String
+    var existingNoteFilename: String?
+
+    init(
+        id: UUID,
+        displayName: String,
+        bookmarkData: Data? = nil,
+        isDefault: Bool,
+        saveMode: DestinationSaveMode = .newNote,
+        rollingPeriod: RollingPeriod = .daily,
+        filenameFormat: String = RollingPeriod.daily.defaultFilenameFormat,
+        existingNoteFilename: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.bookmarkData = bookmarkData
+        self.isDefault = isDefault
+        self.saveMode = saveMode
+        self.rollingPeriod = rollingPeriod
+        self.filenameFormat = filenameFormat
+        self.existingNoteFilename = existingNoteFilename
+    }
 
     static func makeDefault(displayName: String = "Freewrite") -> SaveDestination {
         SaveDestination(id: UUID(), displayName: displayName, bookmarkData: nil, isDefault: true)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case bookmarkData
+        case isDefault
+        case saveMode
+        case rollingPeriod
+        case filenameFormat
+        case existingNoteFilename
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        isDefault = try container.decode(Bool.self, forKey: .isDefault)
+        // Backward-compatible defaults: pre-save-mode destinations stay New note.
+        saveMode = try container.decodeIfPresent(DestinationSaveMode.self, forKey: .saveMode) ?? .newNote
+        rollingPeriod = try container.decodeIfPresent(RollingPeriod.self, forKey: .rollingPeriod) ?? .daily
+        filenameFormat = try container.decodeIfPresent(String.self, forKey: .filenameFormat)
+            ?? rollingPeriod.defaultFilenameFormat
+        existingNoteFilename = try container.decodeIfPresent(String.self, forKey: .existingNoteFilename)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(isDefault, forKey: .isDefault)
+        try container.encode(saveMode, forKey: .saveMode)
+        try container.encode(rollingPeriod, forKey: .rollingPeriod)
+        try container.encode(filenameFormat, forKey: .filenameFormat)
+        try container.encodeIfPresent(existingNoteFilename, forKey: .existingNoteFilename)
     }
 }
 
@@ -163,6 +260,61 @@ final class DestinationStore: ObservableObject {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         destinations[index].displayName = trimmed
+        persistDestinations()
+    }
+
+    /// Updates save-mode related fields and persists immediately.
+    func updateDestination(
+        id: UUID,
+        displayName: String? = nil,
+        saveMode: DestinationSaveMode? = nil,
+        rollingPeriod: RollingPeriod? = nil,
+        filenameFormat: String? = nil,
+        existingNoteFilename: String?? = nil
+    ) {
+        guard let index = destinations.firstIndex(where: { $0.id == id }) else { return }
+        var destination = destinations[index]
+        var didChange = false
+
+        if let displayName {
+            let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, destination.displayName != trimmed {
+                destination.displayName = trimmed
+                didChange = true
+            }
+        }
+
+        if let saveMode, destination.saveMode != saveMode {
+            destination.saveMode = saveMode
+            didChange = true
+        }
+
+        if let rollingPeriod, destination.rollingPeriod != rollingPeriod {
+            destination.rollingPeriod = rollingPeriod
+            // When period changes, apply that period's default format unless caller also sets format.
+            if filenameFormat == nil {
+                destination.filenameFormat = rollingPeriod.defaultFilenameFormat
+            }
+            didChange = true
+        }
+
+        if let filenameFormat {
+            let trimmed = filenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, destination.filenameFormat != trimmed {
+                destination.filenameFormat = trimmed
+                didChange = true
+            }
+        }
+
+        if let existingNoteFilename {
+            if destination.existingNoteFilename != existingNoteFilename {
+                destination.existingNoteFilename = existingNoteFilename
+                didChange = true
+            }
+        }
+
+        guard didChange else { return }
+        destinations[index] = destination
         persistDestinations()
     }
 
