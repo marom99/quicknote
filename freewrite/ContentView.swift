@@ -394,8 +394,6 @@ struct ContentView: View {
     @State private var isHoveringHistoryArrow = false
     @State private var isHoveringCopyTranscript = false
     @State private var isHoveringDestinationChip = false
-    @State private var renameDestinationId: UUID? = nil
-    @State private var renameDisplayName: String = ""
     @State private var settingsDisplayName: String = ""
     @State private var settingsFilenameFormat: String = RollingPeriod.daily.defaultFilenameFormat
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
@@ -851,33 +849,40 @@ struct ContentView: View {
             return true
         }
 
+        // Missing path: stay unbound so typing cannot silently recreate the file
+        // (Existing soft-fail, or Rolling create failure). Settings keep the path.
+        guard target.fileExists else {
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            text = ""
+            isLoadingEntry = false
+            if destination.saveMode == .existing {
+                placeholderText = "Configured note is missing"
+            } else {
+                placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+            }
+            return true
+        }
+
         let entry = entryForResolvedTarget(target)
         if !entries.contains(where: { $0.id == entry.id }) {
             entries.insert(entry, at: 0)
         }
 
         isLoadingEntry = true
-        if fileManager.fileExists(atPath: target.fileURL.path) {
-            loadEntry(entry: entry)
-        } else {
-            // Existing soft-fail: configured path missing on disk.
-            currentVideoURL = nil
-            selectedVideoHasTranscript = false
-            didCopyTranscript = false
-            text = ""
-        }
+        loadEntry(entry: entry)
 
         if appendSeparator {
             text += DestinationWriteTarget.sessionSeparator()
             selectedEntryId = entry.id
             isLoadingEntry = false
-            if fileManager.fileExists(atPath: target.fileURL.path) {
-                saveEntry(entry: entry)
-            }
+            saveEntry(entry: entry)
         } else {
             selectedEntryId = entry.id
             isLoadingEntry = false
-            if entry.entryType == .text, fileManager.fileExists(atPath: target.fileURL.path) {
+            if entry.entryType == .text {
                 updatePreviewText(for: entry)
             }
         }
@@ -1064,12 +1069,6 @@ struct ContentView: View {
         } catch {
             print("Error adding destination: \(error)")
         }
-    }
-
-    private func commitRenameDestination() {
-        guard let id = renameDestinationId else { return }
-        destinationStore.renameDestination(id: id, displayName: renameDisplayName)
-        renameDestinationId = nil
     }
 
     private var activeDestinationDisplayName: String {
@@ -1734,10 +1733,6 @@ struct ContentView: View {
                         }
                     }
                 }
-                Button("Rename…") {
-                    renameDestinationId = destination.id
-                    renameDisplayName = destination.displayName
-                }
             }
             Divider()
             Button("Destination settings…") {
@@ -1771,31 +1766,6 @@ struct ContentView: View {
             } else {
                 NSCursor.pop()
             }
-        }
-        .popover(isPresented: Binding(
-            get: { renameDestinationId != nil },
-            set: { if !$0 { renameDestinationId = nil } }
-        )) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Rename destination")
-                    .font(.system(size: 13, weight: .medium))
-                TextField("Display name", text: $renameDisplayName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220)
-                HStack {
-                    Button("Cancel") {
-                        renameDestinationId = nil
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                    Button("Save") {
-                        commitRenameDestination()
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(16)
-            .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
         }
     }
 
@@ -1916,6 +1886,10 @@ struct ContentView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12, design: .monospaced))
                             Button("Apply format") {
+                                guard DestinationWriteTarget.formattedBasename(
+                                    format: settingsFilenameFormat,
+                                    period: currentPeriod
+                                ) != nil else { return }
                                 applyActiveDestinationSettingsChange(filenameFormat: settingsFilenameFormat)
                             }
                             .buttonStyle(.plain)
