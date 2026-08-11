@@ -8,6 +8,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 enum EntryType {
     case text
@@ -382,6 +383,7 @@ struct ContentView: View {
     @State private var isLoadingEntry = false
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
+    @State private var showingDestinationSettings = false
     @State private var hoveredTrashId: UUID? = nil
     @State private var placeholderText: String = ""  // Add this line
     @State private var isHoveringNewEntry = false
@@ -392,8 +394,8 @@ struct ContentView: View {
     @State private var isHoveringHistoryArrow = false
     @State private var isHoveringCopyTranscript = false
     @State private var isHoveringDestinationChip = false
-    @State private var renameDestinationId: UUID? = nil
-    @State private var renameDisplayName: String = ""
+    @State private var settingsDisplayName: String = ""
+    @State private var settingsFilenameFormat: String = RollingPeriod.daily.defaultFilenameFormat
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -724,6 +726,230 @@ struct ContentView: View {
         }
         return calendar.isDate(timestamp, inSameDayAs: today)
     }
+
+    private var activeSaveMode: DestinationSaveMode {
+        destinationStore.activeDestination?.saveMode ?? .newNote
+    }
+
+    private var listsAllRootMarkdown: Bool {
+        activeSaveMode == .rolling || activeSaveMode == .existing
+    }
+
+    private func entryDisplayDate(from date: Date) -> String {
+        DestinationWriteTarget.displayDateString(from: date)
+    }
+
+    private func modificationDate(for fileURL: URL) -> Date {
+        if let attrs = try? fileManager.attributesOfItem(atPath: fileURL.path),
+           let mod = attrs[.modificationDate] as? Date {
+            return mod
+        }
+        return Date()
+    }
+
+    private func humanEntry(
+        from fileURL: URL,
+        allowNonCanonical: Bool
+    ) -> (entry: HumanEntry, date: Date, content: String)? {
+        let filename = fileURL.lastPathComponent
+        let parsed = parseCanonicalEntryFilename(filename)
+
+        if !allowNonCanonical {
+            guard let parsed else {
+                print("Skipping non-canonical entry filename: \(filename)")
+                return nil
+            }
+        }
+
+        let uuid: UUID
+        let fileDate: Date
+        if let parsed {
+            uuid = parsed.uuid
+            fileDate = parsed.timestamp
+        } else {
+            uuid = DestinationWriteTarget.stableUUID(fromPath: fileURL.standardizedFileURL.path)
+            fileDate = modificationDate(for: fileURL)
+        }
+
+        let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
+        let hasVideo = hasVideoAsset(for: videoFilename)
+
+        do {
+            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            let preview = content
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
+
+            return (
+                entry: HumanEntry(
+                    id: uuid,
+                    date: entryDisplayDate(from: fileDate),
+                    filename: filename,
+                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : truncated,
+                    entryType: hasVideo ? .video : .text,
+                    videoFilename: hasVideo ? videoFilename : nil
+                ),
+                date: fileDate,
+                content: content
+            )
+        } catch {
+            print("Error reading file: \(error)")
+            return nil
+        }
+    }
+
+    /// Builds a HumanEntry for a resolved write target, creating a shell if not yet listed.
+    private func entryForResolvedTarget(_ target: DestinationWriteTarget.ResolvedTarget) -> HumanEntry {
+        if let existing = entries.first(where: { $0.filename == target.filename }) {
+            return existing
+        }
+        return HumanEntry(
+            id: target.entryId,
+            date: target.displayDate,
+            filename: target.filename,
+            previewText: "",
+            entryType: .text,
+            videoFilename: nil
+        )
+    }
+
+    private func bindToResolvedWriteTarget(appendSeparator: Bool = false) -> Bool {
+        guard let destination = destinationStore.activeDestination,
+              destination.saveMode == .rolling || destination.saveMode == .existing,
+              let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
+            return false
+        }
+
+        // Soft-fail existing when no note is configured: empty editor, no crash.
+        if destination.saveMode == .existing,
+           destination.existingNoteFilename == nil ||
+            DestinationWriteTarget.validatedBasename(destination.existingNoteFilename ?? "") == nil {
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            text = ""
+            placeholderText = "Choose a note in Destination settings"
+            return true
+        }
+
+        let createIfMissing = destination.saveMode == .rolling
+
+        guard let target = DestinationWriteTarget.resolve(
+            for: destination,
+            documentsURL: documentsDirectory,
+            createIfMissing: createIfMissing
+        ) else {
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            text = ""
+            return true
+        }
+
+        // Missing path: stay unbound so typing cannot silently recreate the file
+        // (Existing soft-fail, or Rolling create failure). Settings keep the path.
+        guard target.fileExists else {
+            selectedEntryId = nil
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
+            text = ""
+            isLoadingEntry = false
+            if destination.saveMode == .existing {
+                placeholderText = "Configured note is missing"
+            } else {
+                placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+            }
+            return true
+        }
+
+        let entry = entryForResolvedTarget(target)
+        if !entries.contains(where: { $0.id == entry.id }) {
+            entries.insert(entry, at: 0)
+        }
+
+        isLoadingEntry = true
+        loadEntry(entry: entry)
+
+        if appendSeparator {
+            text += DestinationWriteTarget.sessionSeparator()
+            selectedEntryId = entry.id
+            isLoadingEntry = false
+            saveEntry(entry: entry)
+        } else {
+            selectedEntryId = entry.id
+            isLoadingEntry = false
+            if entry.entryType == .text {
+                updatePreviewText(for: entry)
+            }
+        }
+
+        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+        return true
+    }
+
+    private func openHistorySidebar() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if showingSidebar {
+                showingSidebar = false
+            } else {
+                showingDestinationSettings = false
+                showingSidebar = true
+            }
+        }
+    }
+
+    private func openDestinationSettings() {
+        syncSettingsDraftFromActiveDestination()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showingSidebar = false
+            showingDestinationSettings = true
+        }
+    }
+
+    private func syncSettingsDraftFromActiveDestination() {
+        guard let destination = destinationStore.activeDestination else { return }
+        settingsDisplayName = destination.displayName
+        settingsFilenameFormat = destination.filenameFormat
+    }
+
+    private func applyActiveDestinationSettingsChange(
+        displayName: String? = nil,
+        saveMode: DestinationSaveMode? = nil,
+        rollingPeriod: RollingPeriod? = nil,
+        filenameFormat: String? = nil,
+        existingNoteFilename: String?? = nil
+    ) {
+        guard let destination = destinationStore.activeDestination else { return }
+
+        if let currentId = selectedEntryId,
+           let currentEntry = entries.first(where: { $0.id == currentId }),
+           currentEntry.entryType == .text {
+            saveEntry(entry: currentEntry, updatePreview: false)
+        }
+
+        destinationStore.updateDestination(
+            id: destination.id,
+            displayName: displayName,
+            saveMode: saveMode,
+            rollingPeriod: rollingPeriod,
+            filenameFormat: filenameFormat,
+            existingNoteFilename: existingNoteFilename
+        )
+
+        if let updated = destinationStore.activeDestination {
+            settingsDisplayName = updated.displayName
+            settingsFilenameFormat = updated.filenameFormat
+        }
+
+        // Immediate apply: same re-resolve path used on destination switch.
+        DispatchQueue.main.async {
+            self.reloadJournalForActiveDestination()
+        }
+    }
     
     // Add function to save text
     private func saveText() {
@@ -845,12 +1071,6 @@ struct ContentView: View {
         }
     }
 
-    private func commitRenameDestination() {
-        guard let id = renameDestinationId else { return }
-        destinationStore.renameDestination(id: id, displayName: renameDisplayName)
-        renameDestinationId = nil
-    }
-
     private var activeDestinationDisplayName: String {
         destinationStore.activeDestination?.displayName ?? "Freewrite"
     }
@@ -878,52 +1098,12 @@ struct ContentView: View {
 
             print("Found \(mdFiles.count) .md files")
 
-            // Process each file
+            let allowNonCanonical = listsAllRootMarkdown
+
+            // Process each file (canonical-only for New note; all root .md for Rolling/Existing)
             let entriesWithDates = mdFiles.compactMap { fileURL -> (entry: HumanEntry, date: Date, content: String)? in
-                let filename = fileURL.lastPathComponent
-                print("Processing: \(filename)")
-
-                // Only accept canonical entry filenames: [UUID]-[yyyy-MM-dd-HH-mm-ss].md
-                guard let parsed = parseCanonicalEntryFilename(filename) else {
-                    print("Skipping non-canonical entry filename: \(filename)")
-                    return nil
-                }
-                let uuid = parsed.uuid
-                let fileDate = parsed.timestamp
-
-                // Check if there's a corresponding video file
-                let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
-                let hasVideo = hasVideoAsset(for: videoFilename)
-
-                // Read file contents for preview
-                do {
-                    let content = try String(contentsOf: fileURL, encoding: .utf8)
-                    let preview = content
-                        .replacingOccurrences(of: "\n", with: " ")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
-
-                    // Format display date
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateFormat = "MMM d"
-                    let displayDate = dateFormatter.string(from: fileDate)
-
-                    return (
-                        entry: HumanEntry(
-                            id: uuid,
-                            date: displayDate,
-                            filename: filename,
-                            previewText: hasVideo ? videoPreviewText(for: videoFilename) : truncated,
-                            entryType: hasVideo ? .video : .text,
-                            videoFilename: hasVideo ? videoFilename : nil
-                        ),
-                        date: fileDate,
-                        content: content  // Store the full content to check for welcome message
-                    )
-                } catch {
-                    print("Error reading file: \(error)")
-                    return nil
-                }
+                print("Processing: \(fileURL.lastPathComponent)")
+                return humanEntry(from: fileURL, allowNonCanonical: allowNonCanonical)
             }
             
             // Sort and extract entries - store in temporary variable
@@ -938,7 +1118,17 @@ struct ContentView: View {
 
             print("Successfully loaded and sorted \(loadedEntries.count) entries")
 
-            // Check if we need to create a new entry
+            // Now assign to the state variable
+            entries = loadedEntries
+
+            // Rolling / Existing: bind to resolved write target (skip new-note launch rules).
+            if activeSaveMode == .rolling || activeSaveMode == .existing {
+                _ = bindToResolvedWriteTarget(appendSeparator: false)
+                return
+            }
+
+            // --- New note launch selection (unchanged) ---
+
             let calendar = Calendar.current
             let today = Date()
             let hasEntryToday = loadedEntries.contains { isEntryFromToday($0, calendar: calendar, today: today) }
@@ -950,9 +1140,6 @@ struct ContentView: View {
 
             // Check if we have only one entry and it's the welcome message
             let hasOnlyWelcomeEntry = loadedEntries.count == 1 && entriesWithDates.first?.content.contains("Welcome to Freewrite.") == true
-
-            // Now assign to the state variable
-            entries = loadedEntries
 
             // Never open directly into video on startup; create a fresh text entry instead.
             if let latestEntry = entries.first, latestEntry.entryType == .video {
@@ -992,7 +1179,11 @@ struct ContentView: View {
         } catch {
             print("Error loading directory contents: \(error)")
             print("Creating default entry after error")
-            createNewEntry()
+            if activeSaveMode == .rolling || activeSaveMode == .existing {
+                _ = bindToResolvedWriteTarget(appendSeparator: false)
+            } else {
+                createNewEntry()
+            }
         }
     }
     
@@ -1187,9 +1378,7 @@ struct ContentView: View {
 
                             // Version history button
                             Button(action: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    showingSidebar.toggle()
-                                }
+                                openHistorySidebar()
                             }) {
                                 Image(systemName: "clock.arrow.circlepath")
                                     .foregroundColor(isHoveringClock ? textHoverColor : textColor)
@@ -1230,7 +1419,7 @@ struct ContentView: View {
                 }
             }
 
-            // Right sidebar
+            // Right side rails: History and Destination settings (mutually exclusive)
             if showingSidebar {
                 Divider()
                 
@@ -1364,16 +1553,29 @@ struct ContentView: View {
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
                 .transition(.move(edge: .trailing))
             }
+
+            if showingDestinationSettings {
+                Divider()
+                destinationSettingsRail(textColor: textColor)
+                    .frame(width: 260)
+                    .background(Color(colorScheme == .light ? .white : NSColor.black))
+                    .transition(.move(edge: .trailing))
+            }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
         // and top inset + bottom nav need leftover vertical room to write.
-        .frame(minWidth: showingSidebar ? 480 : 280, minHeight: 200)
+        .frame(
+            minWidth: (showingSidebar || showingDestinationSettings) ? 480 : 280,
+            minHeight: 200
+        )
         // Animate only sidebar insertion; AppKit editor is excluded via .transaction above.
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
+        .animation(.easeInOut(duration: 0.2), value: showingDestinationSettings)
         .preferredColorScheme(colorScheme)
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
+            showingDestinationSettings = false
             destinationStore.activateDestination(id: destinationStore.activeDestinationId)
             loadExistingEntries()
         }
@@ -1479,14 +1681,30 @@ struct ContentView: View {
                     // Strip legacy leading newlines from older entries
                     text = String(rawText.drop(while: { $0 == "\n" }))
                     print("Successfully loaded entry: \(entry.filename)")
+                } else {
+                    // Soft-fail missing file (e.g. Existing note removed from disk).
+                    text = ""
+                    print("Entry file missing: \(entry.filename)")
                 }
             } catch {
                 print("Error loading entry: \(error)")
+                text = ""
             }
         }
     }
     
     private func createNewEntry() {
+        // Rolling / Existing: re-bind to current period/target and append a session separator.
+        if activeSaveMode == .rolling || activeSaveMode == .existing {
+            if let currentId = selectedEntryId,
+               let currentEntry = entries.first(where: { $0.id == currentId }),
+               currentEntry.entryType == .text {
+                saveEntry(entry: currentEntry, updatePreview: false)
+            }
+            _ = bindToResolvedWriteTarget(appendSeparator: true)
+            return
+        }
+
         let newEntry = HumanEntry.createNew()
         entries.insert(newEntry, at: 0) // Add to the beginning
         selectedEntryId = newEntry.id
@@ -1515,12 +1733,11 @@ struct ContentView: View {
                         }
                     }
                 }
-                Button("Rename…") {
-                    renameDestinationId = destination.id
-                    renameDisplayName = destination.displayName
-                }
             }
             Divider()
+            Button("Destination settings…") {
+                openDestinationSettings()
+            }
             Button("Add destination…") {
                 // Dismiss the SwiftUI Menu before presenting NSOpenPanel.
                 // Presenting the panel synchronously from a Menu action can race
@@ -1550,31 +1767,227 @@ struct ContentView: View {
                 NSCursor.pop()
             }
         }
-        .popover(isPresented: Binding(
-            get: { renameDestinationId != nil },
-            set: { if !$0 { renameDestinationId = nil } }
-        )) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Rename destination")
+    }
+
+    @ViewBuilder
+    private func destinationSettingsRail(textColor: Color) -> some View {
+        let destination = destinationStore.activeDestination
+        let pathLabel = destinationStore.activeDocumentsPath
+            ?? (destinationStore.activeAccessFailed ? "Unavailable" : "—")
+        let currentMode = destination?.saveMode ?? .newNote
+        let currentPeriod = destination?.rollingPeriod ?? .daily
+        let existingName = destination?.existingNoteFilename
+
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Destination settings")
                     .font(.system(size: 13, weight: .medium))
-                TextField("Display name", text: $renameDisplayName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220)
-                HStack {
-                    Button("Cancel") {
-                        renameDestinationId = nil
+                    .foregroundColor(textColor)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showingDestinationSettings = false
                     }
-                    .buttonStyle(.plain)
-                    Spacer()
-                    Button("Save") {
-                        commitRenameDestination()
-                    }
-                    .buttonStyle(.plain)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(16)
-            .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Name")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        TextField("Display name", text: $settingsDisplayName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                applyActiveDestinationSettingsChange(displayName: settingsDisplayName)
+                            }
+                        Button("Apply name") {
+                            applyActiveDestinationSettingsChange(displayName: settingsDisplayName)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundColor(textColor)
+
+                        Text("Folder")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                        Text(pathLabel)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Save write as?")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+
+                        ForEach(DestinationSaveMode.allCases, id: \.self) { mode in
+                            Button {
+                                applyActiveDestinationSettingsChange(saveMode: mode)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: currentMode == mode ? "circle.inset.filled" : "circle")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(textColor)
+                                    Text(mode.displayName)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(textColor)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if currentMode == .rolling {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Period")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 6) {
+                                ForEach(RollingPeriod.allCases, id: \.self) { period in
+                                    Button {
+                                        applyActiveDestinationSettingsChange(rollingPeriod: period)
+                                        settingsFilenameFormat = period.defaultFilenameFormat
+                                    } label: {
+                                        Text(period.displayName)
+                                            .font(.system(size: 12))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                currentPeriod == period
+                                                    ? Color.gray.opacity(0.15)
+                                                    : Color.clear
+                                            )
+                                            .cornerRadius(4)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundColor(textColor)
+                                }
+                            }
+
+                            Text("Filename format")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            TextField("yyyy-MM-dd", text: $settingsFilenameFormat)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                            Button("Apply format") {
+                                guard DestinationWriteTarget.formattedBasename(
+                                    format: settingsFilenameFormat,
+                                    period: currentPeriod
+                                ) != nil else { return }
+                                applyActiveDestinationSettingsChange(filenameFormat: settingsFilenameFormat)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundColor(textColor)
+
+                            Text("Tokens: yyyy MM dd ww — quote literals, e.g. yyyy-'W'ww")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if let preview = DestinationWriteTarget.formattedBasename(
+                                format: settingsFilenameFormat,
+                                period: currentPeriod
+                            ) {
+                                Text("Today → \(preview).md")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("Invalid format (no path separators; basename only)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if currentMode == .existing {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Note")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Text(existingName ?? "None selected")
+                                .font(.system(size: 12))
+                                .foregroundColor(existingName == nil ? .secondary : textColor)
+                                .lineLimit(2)
+
+                            Button("Choose note…") {
+                                DispatchQueue.main.async {
+                                    pickExistingNoteForActiveDestination()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 13))
+                            .foregroundColor(textColor)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .scrollIndicators(.never)
         }
+    }
+
+    private func pickExistingNoteForActiveDestination() {
+        guard let documentsURL = destinationStore.resolvedDocumentsURL() else { return }
+
+        UserDefaults.standard.removeObject(forKey: "NSOSPLastRootDirectory")
+
+        // Save panel allows pick-or-create a .md basename under the destination root.
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = false
+        panel.directoryURL = documentsURL
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.allowsOtherFileTypes = true
+        panel.nameFieldStringValue = destinationStore.activeDestination?.existingNoteFilename
+            ?? "journal.md"
+        panel.title = "Choose or create a note"
+        panel.message = "Select or name a markdown file in this destination folder."
+        panel.prompt = "Use Note"
+
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else { return }
+
+        let standardizedRoot = documentsURL.standardizedFileURL.path
+        let standardizedPick = url.standardizedFileURL.path
+        guard standardizedPick.hasPrefix(standardizedRoot + "/") || standardizedPick == standardizedRoot else {
+            print("Existing note must stay inside the destination folder")
+            return
+        }
+
+        let relative = String(standardizedPick.dropFirst(standardizedRoot.count + 1))
+        guard DestinationWriteTarget.validatedBasename(relative) != nil,
+              !relative.contains("/") else {
+            print("Existing note must be a root-level basename (no subfolders)")
+            return
+        }
+
+        let filename = DestinationWriteTarget.markdownFilename(
+            fromBasename: DestinationWriteTarget.validatedBasename(relative) ?? relative
+        )
+        let finalURL = documentsURL.appendingPathComponent(filename)
+
+        // Create-on-pick if missing.
+        if !fileManager.fileExists(atPath: finalURL.path) {
+            try? "".write(to: finalURL, atomically: true, encoding: .utf8)
+        }
+
+        applyActiveDestinationSettingsChange(existingNoteFilename: .some(filename))
     }
 
     private func deleteEntry(entry: HumanEntry) {

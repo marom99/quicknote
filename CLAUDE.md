@@ -69,6 +69,8 @@ freewrite/
 ├── freewrite/
 │   ├── freewriteApp.swift        # App entry point
 │   ├── ContentView.swift         # Main view (1400+ lines)
+│   ├── DestinationStore.swift    # Named destinations + save modes
+│   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
 │   ├── VideoRecordingView.swift  # Video recording interface
 │   ├── VideoPlayerView.swift     # Video playback interface
 │   └── freewrite.entitlements    # App permissions
@@ -104,8 +106,14 @@ struct HumanEntry: Identifiable {
 - Writers pick additional journal folders via the bottom-left destination menu (`Add destination…`).
 - Each destination has a display name (defaults to the folder name) and an optional security-scoped bookmark for user-picked paths.
 - The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
+- **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
+  - **New note**: same as legacy Freewrite — UUID-timestamp entries; launch creates/selects today's empty entry.
+  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n`.
+  - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
-- `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; `ContentView` wires the chip/menu UI and journal reload on switch.
+- **History listing**: New note lists **canonical** `[UUID]-[timestamp].md` only; Rolling / Existing list **all root `.md`**, with non-canonical rows using a stable UUID derived from the file path.
+- **Destination settings** rail opens from the destination menu (`Destination settings…`); mutually exclusive with History; edits the active destination only; changes apply immediately and re-resolve the write target. Out of v1: video into rolling, subfolders in format, folder rebind.
+- `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; pure helpers live in `DestinationWriteTarget.swift`; `ContentView` wires the chip/menu UI, settings rail, resolve/bind, and journal reload on switch.
 - Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
 
 **Location** (active destination root):
