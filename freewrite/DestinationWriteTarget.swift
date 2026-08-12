@@ -92,6 +92,101 @@ enum DestinationWriteTarget {
         return "\(basename).md"
     }
 
+    // MARK: - Capture-per-session (New note)
+
+    static let captureDraftPrefix = ".quicknote-capture-"
+
+    static func isCaptureDraftFilename(_ filename: String) -> Bool {
+        filename.hasPrefix(captureDraftPrefix) && filename.lowercased().hasSuffix(".md")
+    }
+
+    static func dateCaptureBasename(now: Date = Date(), calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
+        return formatter.string(from: now)
+    }
+
+    /// First paragraph of content (text before the first blank line).
+    static func firstParagraph(from content: String) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let paragraph = trimmed
+            .components(separatedBy: "\n\n")
+            .first?
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let paragraph, !paragraph.isEmpty else { return nil }
+        return paragraph
+    }
+
+    /// Sanitizes the first paragraph into a filesystem-safe basename (max 80 chars).
+    static func sanitizedTitleBasename(from content: String, maxLength: Int = 80) -> String? {
+        guard let paragraph = firstParagraph(from: content) else { return nil }
+
+        let invalidScalars = CharacterSet(charactersIn: "/\\:*?\"<>|")
+        var sanitized = ""
+        sanitized.reserveCapacity(min(paragraph.count, maxLength))
+
+        for scalar in paragraph.unicodeScalars {
+            if invalidScalars.contains(scalar) || CharacterSet.controlCharacters.contains(scalar) {
+                continue
+            }
+            sanitized.append(Character(scalar))
+            if sanitized.count >= maxLength {
+                break
+            }
+        }
+
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        return validatedBasename(sanitized)
+    }
+
+    static func captureDraftFilename(captureId: UUID) -> String {
+        "\(captureDraftPrefix)\(captureId.uuidString).md"
+    }
+
+    static func uniqueMarkdownFilename(
+        preferredBasename: String,
+        documentsURL: URL,
+        fileManager: FileManager = .default,
+        excluding excludedFilename: String? = nil
+    ) -> String {
+        guard let base = validatedBasename(preferredBasename) else {
+            return markdownFilename(fromBasename: dateCaptureBasename())
+        }
+
+        var candidate = markdownFilename(fromBasename: base)
+        if !fileExists(filename: candidate, in: documentsURL, excluding: excludedFilename, fileManager: fileManager) {
+            return candidate
+        }
+
+        var counter = 2
+        while true {
+            candidate = markdownFilename(fromBasename: "\(base)-\(counter)")
+            if !fileExists(filename: candidate, in: documentsURL, excluding: excludedFilename, fileManager: fileManager) {
+                return candidate
+            }
+            counter += 1
+        }
+    }
+
+    private static func fileExists(
+        filename: String,
+        in documentsURL: URL,
+        excluding excludedFilename: String?,
+        fileManager: FileManager
+    ) -> Bool {
+        if let excluded = excludedFilename, filename == excluded {
+            return false
+        }
+        return fileManager.fileExists(atPath: documentsURL.appendingPathComponent(filename).path)
+    }
+
     // MARK: - Identity & separator
 
     /// Deterministic UUID derived from a path string (stable across launches).
