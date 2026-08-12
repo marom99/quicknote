@@ -1283,8 +1283,8 @@ struct ContentView: View {
         guard response == .OK, let url = panel.url else { return }
 
         do {
-            _ = try destinationStore.addDestination(from: url, activate: true)
-            reloadJournalForActiveDestination()
+            let destination = try destinationStore.addDestination(from: url, activate: false)
+            switchToDestination(id: destination.id)
         } catch {
             print("Error adding destination: \(error)")
         }
@@ -1819,12 +1819,14 @@ struct ContentView: View {
         .onChange(of: text) { _ in
             guard !isLoadingEntry else { return }
             if isCapturePerSessionMode {
-                if inProgressCaptureFilename != nil || normalizedCaptureContent(text).isEmpty == false {
+                if inProgressCaptureFilename != nil {
                     handleCaptureTextChange()
                 } else if let currentId = selectedEntryId,
                           let currentEntry = entries.first(where: { $0.id == currentId }),
                           currentEntry.entryType == .text {
                     saveEntry(entry: currentEntry)
+                } else if normalizedCaptureContent(text).isEmpty == false {
+                    handleCaptureTextChange()
                 }
             } else if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
