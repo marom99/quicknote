@@ -1369,7 +1369,58 @@ struct ContentView: View {
         return (fontSize * 1.5) - defaultLineHeight
     }
 
+    private func captureTitleBarDate(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func titleBarDateFromCaptureFilename(_ filename: String) -> String? {
+        var basename = filename
+        if basename.lowercased().hasSuffix(".md") {
+            basename = String(basename.dropLast(3))
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
+
+        if let date = formatter.date(from: basename) {
+            return captureTitleBarDate(from: date)
+        }
+
+        if let suffixRange = basename.range(of: #"-\d+$"#, options: .regularExpression) {
+            let withoutSuffix = String(basename[..<suffixRange.lowerBound])
+            if let date = formatter.date(from: withoutSuffix) {
+                return captureTitleBarDate(from: date)
+            }
+        }
+
+        return nil
+    }
+
     private var currentEntryTitle: String {
+        if isCapturePerSessionMode,
+           destinationStore.activeDestination?.newNoteFilenameFormat == .date {
+            if let started = captureStartedAt, inProgressCaptureFilename != nil {
+                return captureTitleBarDate(from: started)
+            }
+
+            if let selectedEntryId,
+               let entry = entries.first(where: { $0.id == selectedEntryId }) {
+                if entry.entryType == .video {
+                    return entry.previewText.isEmpty ? "Video Entry" : entry.previewText
+                }
+                if let fromFilename = titleBarDateFromCaptureFilename(entry.filename) {
+                    return fromFilename
+                }
+                return entry.date
+            }
+
+            return "Untitled"
+        }
+
         guard let selectedEntryId,
               let entry = entries.first(where: { $0.id == selectedEntryId }) else {
             return "Untitled"
