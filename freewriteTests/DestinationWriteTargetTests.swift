@@ -194,4 +194,50 @@ struct DestinationWriteTargetTests {
         )
         #expect(resolved == nil)
     }
+
+    @Test func dateCaptureBasenameUsesContractFormat() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 8, day: 12, hour: 10, minute: 30, second: 45))!
+        let basename = DestinationWriteTarget.dateCaptureBasename(now: now, calendar: calendar)
+        #expect(basename == "2026-08-12-10-30-45")
+    }
+
+    @Test func sanitizedTitleBasenameFromFirstParagraph() {
+        let content = "Meeting notes about launch\n\nSecond paragraph ignored."
+        let basename = DestinationWriteTarget.sanitizedTitleBasename(from: content)
+        #expect(basename == "Meeting notes about launch")
+    }
+
+    @Test func sanitizedTitleBasenameStripsInvalidCharacters() {
+        let content = "Notes: launch / planning?"
+        let basename = DestinationWriteTarget.sanitizedTitleBasename(from: content)
+        #expect(basename == "Notes launch  planning")
+    }
+
+    @Test func captureDraftFilenameIsHiddenDraft() {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let filename = DestinationWriteTarget.captureDraftFilename(captureId: id)
+        #expect(filename == ".quicknote-capture-00000000-0000-0000-0000-000000000001.md")
+        #expect(DestinationWriteTarget.isCaptureDraftFilename(filename))
+    }
+
+    @Test func uniqueMarkdownFilenameAvoidsCollisions() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("freewrite-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try "first".write(
+            to: tempDir.appendingPathComponent("note.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let unique = DestinationWriteTarget.uniqueMarkdownFilename(
+            preferredBasename: "note",
+            documentsURL: tempDir
+        )
+        #expect(unique == "note-2.md")
+    }
 }

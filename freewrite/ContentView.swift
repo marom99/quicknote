@@ -396,6 +396,9 @@ struct ContentView: View {
     @State private var isHoveringDestinationChip = false
     @State private var settingsDisplayName: String = ""
     @State private var settingsFilenameFormat: String = RollingPeriod.daily.defaultFilenameFormat
+    @State private var settingsNewNoteFilenameFormat: NewNoteFilenameFormat = .date
+    @State private var inProgressCaptureFilename: String? = nil
+    @State private var captureStartedAt: Date? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -732,7 +735,208 @@ struct ContentView: View {
     }
 
     private var listsAllRootMarkdown: Bool {
-        activeSaveMode == .rolling || activeSaveMode == .existing
+        activeSaveMode == .rolling || activeSaveMode == .existing || activeSaveMode == .newNote
+    }
+
+    private var isCapturePerSessionMode: Bool {
+        activeSaveMode == .newNote
+    }
+
+    private func normalizedCaptureContent(_ content: String) -> String {
+        content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func beginFreshCaptureSession(clearText: Bool) {
+        inProgressCaptureFilename = nil
+        captureStartedAt = nil
+        selectedEntryId = nil
+        currentVideoURL = nil
+        selectedVideoHasTranscript = false
+        didCopyTranscript = false
+        if clearText {
+            isLoadingEntry = true
+            text = ""
+            isLoadingEntry = false
+        }
+        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+    }
+
+    private func deleteCaptureFileIfExists(_ filename: String) {
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
+        let fileURL = documentsDirectory.appendingPathComponent(filename)
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try? fileManager.removeItem(at: fileURL)
+        }
+    }
+
+    private func removeEntry(withFilename filename: String) {
+        if let index = entries.firstIndex(where: { $0.filename == filename }) {
+            entries.remove(at: index)
+        }
+        if selectedEntryId != nil,
+           entries.first(where: { $0.id == selectedEntryId }) == nil {
+            selectedEntryId = nil
+        }
+    }
+
+    private func moveCaptureFile(from sourceFilename: String, to destinationFilename: String, in documentsDirectory: URL) {
+        let sourceURL = documentsDirectory.appendingPathComponent(sourceFilename)
+        let destinationURL = documentsDirectory.appendingPathComponent(destinationFilename)
+        guard sourceFilename != destinationFilename else { return }
+        guard fileManager.fileExists(atPath: sourceURL.path) else { return }
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try? fileManager.removeItem(at: destinationURL)
+        }
+
+        do {
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        } catch {
+            print("Error renaming capture file: \(error)")
+        }
+    }
+
+    private func updateEntryFilename(from sourceFilename: String, to destinationFilename: String) {
+        guard let index = entries.firstIndex(where: { $0.filename == sourceFilename }) else { return }
+        let existing = entries[index]
+        let newPath = getDocumentsDirectory()?
+            .appendingPathComponent(destinationFilename)
+            .standardizedFileURL.path ?? destinationFilename
+        let newId = DestinationWriteTarget.stableUUID(fromPath: newPath)
+        entries[index] = HumanEntry(
+            id: newId,
+            date: existing.date,
+            filename: destinationFilename,
+            previewText: existing.previewText,
+            entryType: existing.entryType,
+            videoFilename: existing.videoFilename
+        )
+        if selectedEntryId == existing.id {
+            selectedEntryId = newId
+        }
+        if inProgressCaptureFilename == sourceFilename {
+            inProgressCaptureFilename = destinationFilename
+        }
+    }
+
+    private func startCaptureSession() {
+        guard isCapturePerSessionMode,
+              inProgressCaptureFilename == nil,
+              let documentsDirectory = getDocumentsDirectory() else {
+            return
+        }
+
+        let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
+        let now = Date()
+        captureStartedAt = now
+        let captureId = UUID()
+
+        let filename: String
+        switch format {
+        case .date:
+            filename = DestinationWriteTarget.uniqueMarkdownFilename(
+                preferredBasename: DestinationWriteTarget.dateCaptureBasename(now: now),
+                documentsURL: documentsDirectory
+            )
+        case .title:
+            filename = DestinationWriteTarget.captureDraftFilename(captureId: captureId)
+        }
+
+        inProgressCaptureFilename = filename
+        let pathKey = documentsDirectory.appendingPathComponent(filename).standardizedFileURL.path
+        let entry = HumanEntry(
+            id: DestinationWriteTarget.stableUUID(fromPath: pathKey),
+            date: DestinationWriteTarget.displayDateString(from: now),
+            filename: filename,
+            previewText: "",
+            entryType: .text,
+            videoFilename: nil
+        )
+        entries.insert(entry, at: 0)
+        selectedEntryId = entry.id
+        saveEntry(entry: entry)
+    }
+
+    private func handleCaptureTextChange() {
+        guard isCapturePerSessionMode, !isLoadingEntry else { return }
+
+        let trimmed = normalizedCaptureContent(text)
+
+        if trimmed.isEmpty {
+            if let filename = inProgressCaptureFilename {
+                deleteCaptureFileIfExists(filename)
+                removeEntry(withFilename: filename)
+                inProgressCaptureFilename = nil
+                captureStartedAt = nil
+            }
+            return
+        }
+
+        if inProgressCaptureFilename == nil {
+            startCaptureSession()
+        }
+
+        guard let filename = inProgressCaptureFilename,
+              let entry = entries.first(where: { $0.filename == filename }) else {
+            return
+        }
+        saveEntry(entry: entry)
+    }
+
+    private func finalizeCaptureSession() {
+        guard isCapturePerSessionMode else {
+            if let currentId = selectedEntryId,
+               let currentEntry = entries.first(where: { $0.id == currentId }),
+               currentEntry.entryType == .text {
+                saveEntry(entry: currentEntry, updatePreview: false)
+            }
+            return
+        }
+
+        guard let draftFilename = inProgressCaptureFilename else { return }
+        guard let documentsDirectory = getDocumentsDirectory() else { return }
+
+        let trimmed = normalizedCaptureContent(text)
+        if trimmed.isEmpty {
+            deleteCaptureFileIfExists(draftFilename)
+            removeEntry(withFilename: draftFilename)
+            beginFreshCaptureSession(clearText: true)
+            return
+        }
+
+        if let entry = entries.first(where: { $0.filename == draftFilename }) {
+            saveEntry(entry: entry, updatePreview: true)
+        }
+
+        let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
+        if format == .title {
+            let fallbackBasename: String
+            if let started = captureStartedAt {
+                fallbackBasename = DestinationWriteTarget.dateCaptureBasename(now: started)
+            } else {
+                fallbackBasename = DestinationWriteTarget.dateCaptureBasename()
+            }
+
+            let preferredBasename = DestinationWriteTarget.sanitizedTitleBasename(from: text) ?? fallbackBasename
+            let finalFilename = DestinationWriteTarget.uniqueMarkdownFilename(
+                preferredBasename: preferredBasename,
+                documentsURL: documentsDirectory,
+                excluding: draftFilename
+            )
+
+            if finalFilename != draftFilename {
+                moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory)
+                updateEntryFilename(from: draftFilename, to: finalFilename)
+            }
+        }
+
+        inProgressCaptureFilename = nil
+        captureStartedAt = nil
+        selectedEntryId = nil
+        isLoadingEntry = true
+        text = ""
+        isLoadingEntry = false
+        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
     }
 
     private func entryDisplayDate(from date: Date) -> String {
@@ -914,6 +1118,7 @@ struct ContentView: View {
         guard let destination = destinationStore.activeDestination else { return }
         settingsDisplayName = destination.displayName
         settingsFilenameFormat = destination.filenameFormat
+        settingsNewNoteFilenameFormat = destination.newNoteFilenameFormat
     }
 
     private func applyActiveDestinationSettingsChange(
@@ -921,11 +1126,14 @@ struct ContentView: View {
         saveMode: DestinationSaveMode? = nil,
         rollingPeriod: RollingPeriod? = nil,
         filenameFormat: String? = nil,
+        newNoteFilenameFormat: NewNoteFilenameFormat? = nil,
         existingNoteFilename: String?? = nil
     ) {
         guard let destination = destinationStore.activeDestination else { return }
 
-        if let currentId = selectedEntryId,
+        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
+            finalizeCaptureSession()
+        } else if let currentId = selectedEntryId,
            let currentEntry = entries.first(where: { $0.id == currentId }),
            currentEntry.entryType == .text {
             saveEntry(entry: currentEntry, updatePreview: false)
@@ -937,12 +1145,14 @@ struct ContentView: View {
             saveMode: saveMode,
             rollingPeriod: rollingPeriod,
             filenameFormat: filenameFormat,
+            newNoteFilenameFormat: newNoteFilenameFormat,
             existingNoteFilename: existingNoteFilename
         )
 
         if let updated = destinationStore.activeDestination {
             settingsDisplayName = updated.displayName
             settingsFilenameFormat = updated.filenameFormat
+            settingsNewNoteFilenameFormat = updated.newNoteFilenameFormat
         }
 
         // Immediate apply: same re-resolve path used on destination switch.
@@ -990,7 +1200,9 @@ struct ContentView: View {
     private func selectEntry(_ entry: HumanEntry) {
         guard selectedEntryId != entry.id else { return }
 
-        if let currentId = selectedEntryId,
+        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
+            finalizeCaptureSession()
+        } else if let currentId = selectedEntryId,
            let currentEntry = entries.first(where: { $0.id == currentId }),
            currentEntry.entryType == .text {
             saveEntry(entry: currentEntry, updatePreview: false)
@@ -1013,11 +1225,16 @@ struct ContentView: View {
     }
 
     private func reloadJournalForActiveDestination() {
+        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
+            finalizeCaptureSession()
+        }
         selectedEntryId = nil
         currentVideoURL = nil
         selectedVideoHasTranscript = false
         didCopyTranscript = false
         thumbnailMemoryCache.removeAllObjects()
+        inProgressCaptureFilename = nil
+        captureStartedAt = nil
         text = ""
         loadExistingEntries()
     }
@@ -1025,7 +1242,9 @@ struct ContentView: View {
     private func switchToDestination(id: UUID) {
         guard id != destinationStore.activeDestinationId else { return }
 
-        if let currentId = selectedEntryId,
+        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
+            finalizeCaptureSession()
+        } else if let currentId = selectedEntryId,
            let currentEntry = entries.first(where: { $0.id == currentId }),
            currentEntry.entryType == .text {
             saveEntry(entry: currentEntry)
@@ -1064,8 +1283,8 @@ struct ContentView: View {
         guard response == .OK, let url = panel.url else { return }
 
         do {
-            _ = try destinationStore.addDestination(from: url, activate: true)
-            reloadJournalForActiveDestination()
+            let destination = try destinationStore.addDestination(from: url, activate: false)
+            switchToDestination(id: destination.id)
         } catch {
             print("Error adding destination: \(error)")
         }
@@ -1094,7 +1313,10 @@ struct ContentView: View {
         
         do {
             let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
-            let mdFiles = fileURLs.filter { $0.pathExtension == "md" }
+            let mdFiles = fileURLs.filter {
+                $0.pathExtension == "md"
+                    && !DestinationWriteTarget.isCaptureDraftFilename($0.lastPathComponent)
+            }
 
             print("Found \(mdFiles.count) .md files")
 
@@ -1127,54 +1349,8 @@ struct ContentView: View {
                 return
             }
 
-            // --- New note launch selection (unchanged) ---
-
-            let calendar = Calendar.current
-            let today = Date()
-            let hasEntryToday = loadedEntries.contains { isEntryFromToday($0, calendar: calendar, today: today) }
-            let hasEmptyTextEntryToday = loadedEntries.contains {
-                isEntryFromToday($0, calendar: calendar, today: today) &&
-                $0.entryType == .text &&
-                $0.previewText.isEmpty
-            }
-
-            // Check if we have only one entry and it's the welcome message
-            let hasOnlyWelcomeEntry = loadedEntries.count == 1 && entriesWithDates.first?.content.contains("Welcome to Freewrite.") == true
-
-            // Never open directly into video on startup; create a fresh text entry instead.
-            if let latestEntry = entries.first, latestEntry.entryType == .video {
-                print("Latest entry is video, creating new text entry for startup")
-                createNewEntry()
-                return
-            }
-
-            if entries.isEmpty {
-                // First time user - create entry with welcome message
-                print("First time user, creating welcome entry")
-                createNewEntry()
-            } else if !hasEntryToday && !hasOnlyWelcomeEntry {
-                // No entries at all for today - create a new text entry
-                print("No entry for today, creating new entry")
-                createNewEntry()
-            } else {
-                // Prefer an empty text entry from today for writing continuity; otherwise pick latest entry.
-                if hasEmptyTextEntryToday,
-                   let todayEntry = entries.first(where: {
-                       isEntryFromToday($0, calendar: calendar, today: today) &&
-                       $0.entryType == .text &&
-                       $0.previewText.isEmpty
-                   }) {
-                    selectedEntryId = todayEntry.id
-                    loadEntry(entry: todayEntry)
-                } else if hasOnlyWelcomeEntry {
-                    // If we only have the welcome entry, select it
-                    selectedEntryId = entries[0].id
-                    loadEntry(entry: entries[0])
-                } else if let latestEntry = entries.first {
-                    selectedEntryId = latestEntry.id
-                    loadEntry(entry: latestEntry)
-                }
-            }
+            // New note: load history, start with a fresh empty capture session.
+            beginFreshCaptureSession(clearText: true)
             
         } catch {
             print("Error loading directory contents: \(error)")
@@ -1182,7 +1358,7 @@ struct ContentView: View {
             if activeSaveMode == .rolling || activeSaveMode == .existing {
                 _ = bindToResolvedWriteTarget(appendSeparator: false)
             } else {
-                createNewEntry()
+                beginFreshCaptureSession(clearText: true)
             }
         }
     }
@@ -1193,7 +1369,58 @@ struct ContentView: View {
         return (fontSize * 1.5) - defaultLineHeight
     }
 
+    private func captureTitleBarDate(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func titleBarDateFromCaptureFilename(_ filename: String) -> String? {
+        var basename = filename
+        if basename.lowercased().hasSuffix(".md") {
+            basename = String(basename.dropLast(3))
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
+
+        if let date = formatter.date(from: basename) {
+            return captureTitleBarDate(from: date)
+        }
+
+        if let suffixRange = basename.range(of: #"-\d+$"#, options: .regularExpression) {
+            let withoutSuffix = String(basename[..<suffixRange.lowerBound])
+            if let date = formatter.date(from: withoutSuffix) {
+                return captureTitleBarDate(from: date)
+            }
+        }
+
+        return nil
+    }
+
     private var currentEntryTitle: String {
+        if isCapturePerSessionMode,
+           destinationStore.activeDestination?.newNoteFilenameFormat == .date {
+            if let started = captureStartedAt, inProgressCaptureFilename != nil {
+                return captureTitleBarDate(from: started)
+            }
+
+            if let selectedEntryId,
+               let entry = entries.first(where: { $0.id == selectedEntryId }) {
+                if entry.entryType == .video {
+                    return entry.previewText.isEmpty ? "Video Entry" : entry.previewText
+                }
+                if let fromFilename = titleBarDateFromCaptureFilename(entry.filename) {
+                    return fromFilename
+                }
+                return entry.date
+            }
+
+            return "Untitled"
+        }
+
         guard let selectedEntryId,
               let entry = entries.first(where: { $0.id == selectedEntryId }) else {
             return "Untitled"
@@ -1579,10 +1806,29 @@ struct ContentView: View {
             destinationStore.activateDestination(id: destinationStore.activeDestinationId)
             loadExistingEntries()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            finalizeCaptureSession()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.isKeyWindow || NSApplication.shared.keyWindow == window else {
+                return
+            }
+            finalizeCaptureSession()
+        }
         .onChange(of: text) { _ in
             guard !isLoadingEntry else { return }
-            // Save current entry when text changes
-            if let currentId = selectedEntryId,
+            if isCapturePerSessionMode {
+                if inProgressCaptureFilename != nil {
+                    handleCaptureTextChange()
+                } else if let currentId = selectedEntryId,
+                          let currentEntry = entries.first(where: { $0.id == currentId }),
+                          currentEntry.entryType == .text {
+                    saveEntry(entry: currentEntry)
+                } else if normalizedCaptureContent(text).isEmpty == false {
+                    handleCaptureTextChange()
+                }
+            } else if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
                currentEntry.entryType == .text {
                 saveEntry(entry: currentEntry)
@@ -1705,17 +1951,8 @@ struct ContentView: View {
             return
         }
 
-        let newEntry = HumanEntry.createNew()
-        entries.insert(newEntry, at: 0) // Add to the beginning
-        selectedEntryId = newEntry.id
-        currentVideoURL = nil
-        selectedVideoHasTranscript = false
-        didCopyTranscript = false
-        text = ""
-        // Randomize placeholder text for new entry
-        placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-        // Save the empty entry
-        saveEntry(entry: newEntry)
+        finalizeCaptureSession()
+        beginFreshCaptureSession(clearText: true)
     }
 
     @ViewBuilder
@@ -1849,6 +2086,38 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                        }
+                    }
+
+                    if currentMode == .newNote {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Filename format")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+
+                            ForEach(NewNoteFilenameFormat.allCases, id: \.self) { format in
+                                Button {
+                                    applyActiveDestinationSettingsChange(newNoteFilenameFormat: format)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: settingsNewNoteFilenameFormat == format ? "circle.inset.filled" : "circle")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(textColor)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(format.displayName)
+                                                .font(.system(size: 13))
+                                                .foregroundColor(textColor)
+                                            Text(format == .date
+                                                 ? "Date and time when capture starts"
+                                                 : "First paragraph when capture closes")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
 
@@ -2014,6 +2283,8 @@ struct ContentView: View {
                     if let firstEntry = entries.first {
                         selectedEntryId = firstEntry.id
                         loadEntry(entry: firstEntry)
+                    } else if isCapturePerSessionMode {
+                        beginFreshCaptureSession(clearText: true)
                     } else {
                         createNewEntry()
                     }

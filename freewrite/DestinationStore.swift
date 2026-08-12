@@ -14,6 +14,18 @@ enum DestinationSaveMode: String, Codable, Equatable, CaseIterable {
     }
 }
 
+enum NewNoteFilenameFormat: String, Codable, Equatable, CaseIterable {
+    case date
+    case title
+
+    var displayName: String {
+        switch self {
+        case .date: return "Date"
+        case .title: return "Title"
+        }
+    }
+}
+
 enum RollingPeriod: String, Codable, Equatable, CaseIterable {
     case daily
     case weekly
@@ -44,6 +56,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
     var saveMode: DestinationSaveMode
     var rollingPeriod: RollingPeriod
     var filenameFormat: String
+    var newNoteFilenameFormat: NewNoteFilenameFormat
     var existingNoteFilename: String?
 
     init(
@@ -54,6 +67,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         saveMode: DestinationSaveMode = .newNote,
         rollingPeriod: RollingPeriod = .daily,
         filenameFormat: String = RollingPeriod.daily.defaultFilenameFormat,
+        newNoteFilenameFormat: NewNoteFilenameFormat = .date,
         existingNoteFilename: String? = nil
     ) {
         self.id = id
@@ -63,6 +77,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         self.saveMode = saveMode
         self.rollingPeriod = rollingPeriod
         self.filenameFormat = filenameFormat
+        self.newNoteFilenameFormat = newNoteFilenameFormat
         self.existingNoteFilename = existingNoteFilename
     }
 
@@ -78,6 +93,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         case saveMode
         case rollingPeriod
         case filenameFormat
+        case newNoteFilenameFormat
         case existingNoteFilename
     }
 
@@ -92,6 +108,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         rollingPeriod = try container.decodeIfPresent(RollingPeriod.self, forKey: .rollingPeriod) ?? .daily
         filenameFormat = try container.decodeIfPresent(String.self, forKey: .filenameFormat)
             ?? rollingPeriod.defaultFilenameFormat
+        newNoteFilenameFormat = try container.decodeIfPresent(NewNoteFilenameFormat.self, forKey: .newNoteFilenameFormat) ?? .date
         existingNoteFilename = try container.decodeIfPresent(String.self, forKey: .existingNoteFilename)
     }
 
@@ -104,6 +121,7 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         try container.encode(saveMode, forKey: .saveMode)
         try container.encode(rollingPeriod, forKey: .rollingPeriod)
         try container.encode(filenameFormat, forKey: .filenameFormat)
+        try container.encode(newNoteFilenameFormat, forKey: .newNoteFilenameFormat)
         try container.encodeIfPresent(existingNoteFilename, forKey: .existingNoteFilename)
     }
 }
@@ -270,6 +288,7 @@ final class DestinationStore: ObservableObject {
         saveMode: DestinationSaveMode? = nil,
         rollingPeriod: RollingPeriod? = nil,
         filenameFormat: String? = nil,
+        newNoteFilenameFormat: NewNoteFilenameFormat? = nil,
         existingNoteFilename: String?? = nil
     ) {
         guard let index = destinations.firstIndex(where: { $0.id == id }) else { return }
@@ -304,6 +323,11 @@ final class DestinationStore: ObservableObject {
                 destination.filenameFormat = trimmed
                 didChange = true
             }
+        }
+
+        if let newNoteFilenameFormat, destination.newNoteFilenameFormat != newNoteFilenameFormat {
+            destination.newNoteFilenameFormat = newNoteFilenameFormat
+            didChange = true
         }
 
         if let existingNoteFilename {

@@ -107,22 +107,30 @@ struct HumanEntry: Identifiable {
 - Each destination has a display name (defaults to the folder name) and an optional security-scoped bookmark for user-picked paths.
 - The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
-  - **New note**: same as legacy Freewrite — UUID-timestamp entries; launch creates/selects today's empty entry.
+  - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
   - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n`.
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
-- **History listing**: New note lists **canonical** `[UUID]-[timestamp].md` only; Rolling / Existing list **all root `.md`**, with non-canonical rows using a stable UUID derived from the file path.
+- Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.
+- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized.
 - **Destination settings** rail opens from the destination menu (`Destination settings…`); mutually exclusive with History; edits the active destination only; changes apply immediately and re-resolve the write target. Out of v1: video into rolling, subfolders in format, folder rebind.
 - `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; pure helpers live in `DestinationWriteTarget.swift`; `ContentView` wires the chip/menu UI, settings rail, resolve/bind, and journal reload on switch.
 - Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
+
+**New note capture lifecycle**:
+- A capture starts only when the blank, unbound canvas receives non-whitespace text. Date captures autosave directly to their final timestamp filename; Title captures autosave to a hidden `.quicknote-capture-[UUID].md` draft.
+- Selecting a saved History entry binds the editor to that file. Subsequent edits, including clearing all text, must save that selected file and must not start a new capture.
+- A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Entry, closing the window, or terminating the app.
+- Empty live captures are deleted. A nonempty Title capture is renamed from its hidden draft to a sanitized first-paragraph filename (80 characters maximum), with a timestamp fallback and `-2`, `-3`, etc. collision suffixes.
+- Finalization must run while the capture's destination is still active because autosave, draft cleanup, and title renaming all resolve against the active destination directory.
 
 **Location** (active destination root):
 
 **Text Entries**:
 - Format: Markdown (.md)
-- Naming: `[UUID]-[YYYY-MM-DD-HH-mm-ss].md`
+- Naming depends on destination mode. New note uses `yyyy-MM-dd-HH-mm-ss.md` or a sanitized first-paragraph title; Rolling uses its DateFormatter pattern; Existing uses the selected filename. Legacy canonical `[UUID]-[timestamp].md` files remain readable.
 - Content: Plain UTF-8 text
-- Example: `[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04].md`
+- Examples: `2026-02-20-08-01-04.md`, `Ideas for the launch.md`
 
 **Video Entries**:
 - Format: QuickTime Movie (.mov)
@@ -256,7 +264,7 @@ struct VideoPlayerView: View {
 - **Chat**: Opens AI chat menu (ChatGPT/Claude integration)
 - **Backspace Toggle**: Enable/disable backspace key
 - **Fullscreen**: Toggle fullscreen mode
-- **New Entry**: Creates new text entry
+- **New Entry**: Finalizes the active New note capture and returns to a blank canvas; Rolling / Existing append a timestamped session separator
 - **Theme Toggle**: 🌙/☀️ for dark/light mode
 - **History**: 🕐 Shows/hides sidebar
 
@@ -301,37 +309,28 @@ struct VideoPlayerView: View {
 
 ## Entry Loading Logic
 
-On app launch (`onAppear`):
+On app launch or destination reload:
 
-1. `loadExistingEntries()` called
-2. Reads all files from `~/Documents/Freewrite/`
-3. Filters for canonical `.md` entries and derives expected `.mov` name from each `.md`
-4. For each `.md` file:
-   - Extracts UUID and date from filename via regex
-   - Checks for corresponding `.mov` in this order:
-     - `~/Documents/Freewrite/Videos/[entry-base]/[entry].mov` (current layout)
-     - `~/Documents/Freewrite/Videos/[entry].mov` (legacy flat layout)
-     - `~/Documents/Freewrite/[entry].mov` (oldest legacy layout)
-   - Creates `HumanEntry` with appropriate type
-5. Sorts entries by date (newest first)
-6. Applies launch selection rules in order:
-   - If newest entry is a video entry: create a new text entry and select it (never open directly into video on app launch)
-   - Else if no entries: create welcome entry
-   - Else if no empty entry exists for today (and app is not in the single-welcome-entry state): create a new empty entry
-   - Else select the most recent empty entry from today (or the welcome entry if it's the only entry)
+1. `loadExistingEntries()` reads root-level `.md` files from the active destination, excluding hidden capture drafts.
+2. Canonical legacy filenames retain their embedded UUID and timestamp; other filenames receive a stable UUID derived from their full path and use file modification time for sorting/display.
+3. Video metadata resolves assets from the current per-entry directory and legacy video layouts.
+4. Entries sort newest first.
+5. Rolling / Existing bind the editor to their resolved write target.
+6. New note clears selection and presents a fresh, unbound canvas. It does not create a file until the user types non-whitespace content.
 
 ## Auto-Save Behavior
 
-Text is auto-saved on every change:
+Text is auto-saved on every change. Routing depends on editor state:
 
 ```swift
 .onChange(of: text) { _ in
-    if let currentId = selectedEntryId,
-       let currentEntry = entries.first(where: { $0.id == currentId }) {
-        saveEntry(entry: currentEntry)
-    }
+    // 1. Save the live New note capture when one exists.
+    // 2. Otherwise save the selected History / Rolling / Existing entry.
+    // 3. Only an unbound, nonempty New note canvas starts a new capture.
 }
 ```
+
+The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
 ## Permissions
 
