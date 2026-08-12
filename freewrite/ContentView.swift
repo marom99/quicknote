@@ -395,8 +395,13 @@ struct ContentView: View {
     @State private var isHoveringCopyTranscript = false
     @State private var isHoveringDestinationChip = false
     @State private var settingsDisplayName: String = ""
+    @State private var settingsSaveMode: DestinationSaveMode = .newNote
+    @State private var settingsRollingPeriod: RollingPeriod = .daily
     @State private var settingsFilenameFormat: String = RollingPeriod.daily.defaultFilenameFormat
     @State private var settingsNewNoteFilenameFormat: NewNoteFilenameFormat = .date
+    @State private var settingsExistingNoteFilename: String? = nil
+    @State private var pendingDestinationSettingsCloseAction: DestinationSettingsCloseAction? = nil
+    @State private var showingDiscardDestinationSettingsConfirmation = false
     @State private var inProgressCaptureFilename: String? = nil
     @State private var captureStartedAt: Date? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
@@ -434,6 +439,11 @@ struct ContentView: View {
         cache.countLimit = 512
         return cache
     }()
+
+    private enum DestinationSettingsCloseAction {
+        case closeRail
+        case openHistory
+    }
     
     // Initialize with saved theme preference if available
     init() {
@@ -1096,10 +1106,17 @@ struct ContentView: View {
     }
 
     private func openHistorySidebar() {
+        if showingDestinationSettings && hasUnsavedDestinationSettingsChanges {
+            pendingDestinationSettingsCloseAction = .openHistory
+            showingDiscardDestinationSettingsConfirmation = true
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.2)) {
             if showingSidebar {
                 showingSidebar = false
             } else {
+                syncSettingsDraftFromActiveDestination()
                 showingDestinationSettings = false
                 showingSidebar = true
             }
@@ -1117,45 +1134,115 @@ struct ContentView: View {
     private func syncSettingsDraftFromActiveDestination() {
         guard let destination = destinationStore.activeDestination else { return }
         settingsDisplayName = destination.displayName
+        settingsSaveMode = destination.saveMode
+        settingsRollingPeriod = destination.rollingPeriod
         settingsFilenameFormat = destination.filenameFormat
         settingsNewNoteFilenameFormat = destination.newNoteFilenameFormat
+        settingsExistingNoteFilename = destination.existingNoteFilename
     }
 
-    private func applyActiveDestinationSettingsChange(
-        displayName: String? = nil,
-        saveMode: DestinationSaveMode? = nil,
-        rollingPeriod: RollingPeriod? = nil,
-        filenameFormat: String? = nil,
-        newNoteFilenameFormat: NewNoteFilenameFormat? = nil,
-        existingNoteFilename: String?? = nil
-    ) {
+    private var hasUnsavedDestinationSettingsChanges: Bool {
+        guard let destination = destinationStore.activeDestination else { return false }
+        let draftDisplayName = settingsDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedDisplayName = destination.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return draftDisplayName != savedDisplayName
+            || settingsSaveMode != destination.saveMode
+            || settingsRollingPeriod != destination.rollingPeriod
+            || settingsFilenameFormat != destination.filenameFormat
+            || settingsNewNoteFilenameFormat != destination.newNoteFilenameFormat
+            || settingsExistingNoteFilename != destination.existingNoteFilename
+    }
+
+    private var isDestinationSettingsDraftValid: Bool {
+        if settingsSaveMode == .rolling {
+            return DestinationWriteTarget.formattedBasename(
+                format: settingsFilenameFormat,
+                period: settingsRollingPeriod
+            ) != nil
+        }
+        return true
+    }
+
+    private func closeDestinationSettingsRail() {
+        if hasUnsavedDestinationSettingsChanges {
+            pendingDestinationSettingsCloseAction = .closeRail
+            showingDiscardDestinationSettingsConfirmation = true
+            return
+        }
+
+        syncSettingsDraftFromActiveDestination()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showingDestinationSettings = false
+        }
+    }
+
+    private func discardDestinationSettingsChangesAndContinue() {
+        showingDiscardDestinationSettingsConfirmation = false
+        syncSettingsDraftFromActiveDestination()
+
+        let action = pendingDestinationSettingsCloseAction
+        pendingDestinationSettingsCloseAction = nil
+
+        switch action {
+        case .openHistory:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showingDestinationSettings = false
+                showingSidebar = true
+            }
+        case .closeRail:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showingDestinationSettings = false
+            }
+        case .none:
+            break
+        }
+    }
+
+    private func cancelDestinationSettingsChangesAndClose() {
+        syncSettingsDraftFromActiveDestination()
+        pendingDestinationSettingsCloseAction = nil
+        showingDiscardDestinationSettingsConfirmation = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showingDestinationSettings = false
+        }
+    }
+
+    private func saveDestinationSettingsDraft() {
         guard let destination = destinationStore.activeDestination else { return }
+        guard isDestinationSettingsDraftValid else { return }
 
         if isCapturePerSessionMode, inProgressCaptureFilename != nil {
             finalizeCaptureSession()
         } else if let currentId = selectedEntryId,
-           let currentEntry = entries.first(where: { $0.id == currentId }),
-           currentEntry.entryType == .text {
+                  let currentEntry = entries.first(where: { $0.id == currentId }),
+                  currentEntry.entryType == .text {
             saveEntry(entry: currentEntry, updatePreview: false)
+        }
+
+        if settingsSaveMode == .existing,
+           let filename = settingsExistingNoteFilename,
+           let documentsURL = destinationStore.resolvedDocumentsURL() {
+            let finalURL = documentsURL.appendingPathComponent(filename)
+            if !fileManager.fileExists(atPath: finalURL.path) {
+                try? "".write(to: finalURL, atomically: true, encoding: .utf8)
+            }
         }
 
         destinationStore.updateDestination(
             id: destination.id,
-            displayName: displayName,
-            saveMode: saveMode,
-            rollingPeriod: rollingPeriod,
-            filenameFormat: filenameFormat,
-            newNoteFilenameFormat: newNoteFilenameFormat,
-            existingNoteFilename: existingNoteFilename
+            displayName: settingsDisplayName,
+            saveMode: settingsSaveMode,
+            rollingPeriod: settingsRollingPeriod,
+            filenameFormat: settingsFilenameFormat,
+            newNoteFilenameFormat: settingsNewNoteFilenameFormat,
+            existingNoteFilename: .some(settingsExistingNoteFilename)
         )
 
-        if let updated = destinationStore.activeDestination {
-            settingsDisplayName = updated.displayName
-            settingsFilenameFormat = updated.filenameFormat
-            settingsNewNoteFilenameFormat = updated.newNoteFilenameFormat
-        }
+        syncSettingsDraftFromActiveDestination()
+        pendingDestinationSettingsCloseAction = nil
+        showingDiscardDestinationSettingsConfirmation = false
 
-        // Immediate apply: same re-resolve path used on destination switch.
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
         }
@@ -1834,6 +1921,20 @@ struct ContentView: View {
                 saveEntry(entry: currentEntry)
             }
         }
+        .confirmationDialog(
+            "Discard unsaved destination settings?",
+            isPresented: $showingDiscardDestinationSettingsConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                discardDestinationSettingsChangesAndContinue()
+            }
+            Button("Keep Editing", role: .cancel) {
+                pendingDestinationSettingsCloseAction = nil
+            }
+        } message: {
+            Text("Your destination settings changes have not been saved.")
+        }
     }
     
     private func backgroundColor(for entry: HumanEntry) -> Color {
@@ -2008,12 +2109,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private func destinationSettingsRail(textColor: Color) -> some View {
-        let destination = destinationStore.activeDestination
         let pathLabel = destinationStore.activeDocumentsPath
             ?? (destinationStore.activeAccessFailed ? "Unavailable" : "—")
-        let currentMode = destination?.saveMode ?? .newNote
-        let currentPeriod = destination?.rollingPeriod ?? .daily
-        let existingName = destination?.existingNoteFilename
+        let currentMode = settingsSaveMode
+        let currentPeriod = settingsRollingPeriod
+        let existingName = settingsExistingNoteFilename
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -2022,9 +2122,7 @@ struct ContentView: View {
                     .foregroundColor(textColor)
                 Spacer()
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showingDestinationSettings = false
-                    }
+                    closeDestinationSettingsRail()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
@@ -2045,15 +2143,6 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                         TextField("Display name", text: $settingsDisplayName)
                             .textFieldStyle(.roundedBorder)
-                            .onSubmit {
-                                applyActiveDestinationSettingsChange(displayName: settingsDisplayName)
-                            }
-                        Button("Apply name") {
-                            applyActiveDestinationSettingsChange(displayName: settingsDisplayName)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundColor(textColor)
 
                         Text("Folder")
                             .font(.system(size: 11))
@@ -2073,7 +2162,7 @@ struct ContentView: View {
 
                         ForEach(DestinationSaveMode.allCases, id: \.self) { mode in
                             Button {
-                                applyActiveDestinationSettingsChange(saveMode: mode)
+                                settingsSaveMode = mode
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: currentMode == mode ? "circle.inset.filled" : "circle")
@@ -2097,7 +2186,7 @@ struct ContentView: View {
 
                             ForEach(NewNoteFilenameFormat.allCases, id: \.self) { format in
                                 Button {
-                                    applyActiveDestinationSettingsChange(newNoteFilenameFormat: format)
+                                    settingsNewNoteFilenameFormat = format
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: settingsNewNoteFilenameFormat == format ? "circle.inset.filled" : "circle")
@@ -2129,7 +2218,7 @@ struct ContentView: View {
                             HStack(spacing: 6) {
                                 ForEach(RollingPeriod.allCases, id: \.self) { period in
                                     Button {
-                                        applyActiveDestinationSettingsChange(rollingPeriod: period)
+                                        settingsRollingPeriod = period
                                         settingsFilenameFormat = period.defaultFilenameFormat
                                     } label: {
                                         Text(period.displayName)
@@ -2154,16 +2243,6 @@ struct ContentView: View {
                             TextField("yyyy-MM-dd", text: $settingsFilenameFormat)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12, design: .monospaced))
-                            Button("Apply format") {
-                                guard DestinationWriteTarget.formattedBasename(
-                                    format: settingsFilenameFormat,
-                                    period: currentPeriod
-                                ) != nil else { return }
-                                applyActiveDestinationSettingsChange(filenameFormat: settingsFilenameFormat)
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12))
-                            .foregroundColor(textColor)
 
                             Text("Tokens: yyyy MM dd ww — quote literals, e.g. yyyy-'W'ww")
                                 .font(.system(size: 10))
@@ -2205,6 +2284,26 @@ struct ContentView: View {
                             .foregroundColor(textColor)
                         }
                     }
+
+                    HStack(spacing: 10) {
+                        Button("Cancel") {
+                            cancelDestinationSettingsChangesAndClose()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundColor(textColor)
+
+                        Spacer()
+
+                        Button("Save") {
+                            saveDestinationSettingsDraft()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(textColor)
+                        .opacity((hasUnsavedDestinationSettingsChanges && isDestinationSettingsDraftValid) ? 1 : 0.45)
+                        .disabled(!hasUnsavedDestinationSettingsChanges || !isDestinationSettingsDraftValid)
+                    }
                 }
                 .padding(16)
             }
@@ -2223,8 +2322,7 @@ struct ContentView: View {
         panel.directoryURL = documentsURL
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.allowsOtherFileTypes = true
-        panel.nameFieldStringValue = destinationStore.activeDestination?.existingNoteFilename
-            ?? "journal.md"
+        panel.nameFieldStringValue = settingsExistingNoteFilename ?? "journal.md"
         panel.title = "Choose or create a note"
         panel.message = "Select or name a markdown file in this destination folder."
         panel.prompt = "Use Note"
@@ -2249,14 +2347,7 @@ struct ContentView: View {
         let filename = DestinationWriteTarget.markdownFilename(
             fromBasename: DestinationWriteTarget.validatedBasename(relative) ?? relative
         )
-        let finalURL = documentsURL.appendingPathComponent(filename)
-
-        // Create-on-pick if missing.
-        if !fileManager.fileExists(atPath: finalURL.path) {
-            try? "".write(to: finalURL, atomically: true, encoding: .utf8)
-        }
-
-        applyActiveDestinationSettingsChange(existingNoteFilename: .some(filename))
+        settingsExistingNoteFilename = filename
     }
 
     private func deleteEntry(entry: HumanEntry) {
