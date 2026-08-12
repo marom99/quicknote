@@ -1026,3 +1026,20 @@ Minimal and calm by default — the UI's job is to disappear during timed writin
 - **The Flat-By-Default Rule.** Flat surfaces; one whisper shadow (`rgba(0,0,0,0.10)` @ 4px) reserved for floating popovers only.
 - **The One Voice Rule.** System chrome always speaks in the native system sans; the writer's words may use Lato / Arial / System / Serif / random.
 - Body ink: `#333333` (light) / `#E6E6E6` (dark). Selection/hover fills: gray at 10% / 5%. Editor fills the window with a fixed 18px inset on all four sides, 1.5× line height.
+
+## Cursor Cloud specific instructions
+
+**This app cannot be built, run, linted, or tested inside the Cursor Cloud Agent VM.** The Cloud Agent VM is Linux (Ubuntu x86_64); Freewrite is a **native macOS SwiftUI app** that requires **macOS + Xcode**, neither of which can exist on Linux. Concretely:
+
+- The project is an Xcode project (`freewrite.xcodeproj`, `project.pbxproj`) with **no `Package.swift`**, so Swift Package Manager / `swift build` cannot consume it. All build/test/run flows go through `xcodebuild`, which is macOS-only.
+- Source imports Apple-only frameworks (`SwiftUI`, `AppKit`, `AVFoundation`, `AVKit`, `Speech`, `UniformTypeIdentifiers`) shipped only in the macOS SDK. They are unavailable in the open-source Swift-for-Linux toolchain.
+- `MACOSX_DEPLOYMENT_TARGET = 14.0`; test targets use `@testable import freewrite`, which requires building the full macOS app module — impossible on Linux.
+- `.conductor/settings.toml` already gates setup/build/test/run to local macOS only (`available_in = ["local"]`, and setup is skipped when not local).
+
+**Implication for future cloud agents:** You can still read and edit Swift source in the cloud VM, but you **cannot compile, run, or execute tests here** — do not attempt to install a Swift toolchain to "fix" this; it will not enable building a macOS/Xcode app. Verification must happen on a local macOS machine with Xcode (or a macOS CI runner). Standard commands are documented in this file's **Build Configuration** and **Testing Video Feature** sections and in `.conductor/settings.toml`:
+
+- Build: `xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug build`
+- Test: `xcodebuild -project freewrite.xcodeproj -scheme freewrite -destination 'platform=macOS' test -only-testing:freewriteTests`
+- Run: build, then launch `freewrite.app` (or Product → Run in Xcode).
+
+The Cloud Agent startup/update script is intentionally a **no-op** because there are no Linux-installable dependencies for this macOS Xcode project.
