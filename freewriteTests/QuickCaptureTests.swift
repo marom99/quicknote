@@ -64,6 +64,16 @@ struct QuickCaptureTests {
         #expect(editor.string.isEmpty)
     }
 
+    @MainActor @Test func resumeMovesSelectionToEndOfRollingNote() {
+        let editor = NSTextView()
+        editor.string = "Earlier writing 📝\n---\n2026-11-21 12:15\n"
+        editor.setSelectedRange(NSRange(location: 0, length: 7))
+        editor.isEditable = false
+        QuickCaptureInputGate.resume(editor)
+        #expect(editor.selectedRange() == NSRange(location: (editor.string as NSString).length, length: 0))
+        #expect(editor.isEditable)
+    }
+
     @MainActor @Test func closedEditorsUseFallbackAndKeepPendingRequest() {
         var fallbacks = 0
         var captures = 0

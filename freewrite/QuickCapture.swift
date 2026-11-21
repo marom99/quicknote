@@ -165,6 +165,9 @@ enum QuickCaptureInputGate {
     }
 
     static func resume(_ editor: NSTextView) {
+        let end = NSRange(location: (editor.string as NSString).length, length: 0)
+        editor.setSelectedRange(end)
+        editor.scrollRangeToVisible(end)
         editor.isEditable = true
         editor.window?.makeFirstResponder(editor)
     }
