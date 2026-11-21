@@ -3,6 +3,60 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test(arguments: ["Live title", " \n\t"])
+    func recoversOrphanDraftsWithoutTouchingLiveDraftOrOtherFiles(liveContent: String) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let live = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let orphan = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let empty = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let fixtures = [live: liveContent, orphan: "Recovered: title / test\n\nBody", empty: " \n\t", "ordinary.md": "Unchanged"]
+        for (filename, content) in fixtures {
+            try content.write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live)
+        #expect(failures.isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Recovered title  test.md"), encoding: .utf8) == fixtures[orphan])
+        #expect(try String(contentsOf: directory.appendingPathComponent(live), encoding: .utf8) == fixtures[live])
+        #expect(try String(contentsOf: directory.appendingPathComponent("ordinary.md"), encoding: .utf8) == "Unchanged")
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(orphan).path))
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(empty).path))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live).isEmpty)
+    }
+
+    @Test func recoveryUsesCollisionSuffixesAndTimestampFallbackAndPreservesUnreadableDrafts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for filename in ["Title.md", "Title-2.md"] {
+            try "Existing".write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        for content in ["Title", "///:?"] {
+            try content.write(to: directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID())), atomically: true, encoding: .utf8)
+        }
+        let invalid = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        try Data([0xff]).write(to: invalid)
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory)
+        #expect(failures.map { $0.resolvingSymlinksInPath() } == [invalid.resolvingSymlinksInPath()])
+        #expect(try Data(contentsOf: invalid) == Data([0xff]))
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title-3.md"), encoding: .utf8) == "Title")
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let fallback = try #require(files.first { $0.lastPathComponent.range(of: #"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md$"#, options: .regularExpression) != nil })
+        #expect(try String(contentsOf: fallback, encoding: .utf8) == "///:?")
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title.md"), encoding: .utf8) == "Existing")
+    }
+
+    @Test func recoveryHandlesEmptyAndMissingDirectories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(throws: (any Error).self) {
+            try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory.appendingPathComponent("missing"))
+        }
+    }
+
     @Test func dailyAnchorIsStartOfDay() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

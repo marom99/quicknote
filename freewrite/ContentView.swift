@@ -1399,6 +1399,14 @@ struct ContentView: View {
         }
         
         do {
+            let failedDrafts = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(
+                in: documentsDirectory,
+                excluding: inProgressCaptureFilename,
+                fileManager: fileManager
+            )
+            for draft in failedDrafts {
+                print("Could not recover capture draft: \(draft.lastPathComponent)")
+            }
             let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
             let mdFiles = fileURLs.filter {
                 $0.pathExtension == "md"
@@ -1428,7 +1436,11 @@ struct ContentView: View {
             print("Successfully loaded and sorted \(loadedEntries.count) entries")
 
             // Now assign to the state variable
+            let liveEntry = entries.first { $0.filename == inProgressCaptureFilename }
             entries = loadedEntries
+            if let liveEntry, !entries.contains(where: { $0.filename == liveEntry.filename }) {
+                entries.insert(liveEntry, at: 0)
+            }
 
             // Rolling / Existing: bind to resolved write target (skip new-note launch rules).
             if activeSaveMode == .rolling || activeSaveMode == .existing {
@@ -1437,14 +1449,16 @@ struct ContentView: View {
             }
 
             // New note: load history, start with a fresh empty capture session.
-            beginFreshCaptureSession(clearText: true)
+            if inProgressCaptureFilename == nil {
+                beginFreshCaptureSession(clearText: true)
+            }
             
         } catch {
             print("Error loading directory contents: \(error)")
             print("Creating default entry after error")
             if activeSaveMode == .rolling || activeSaveMode == .existing {
                 _ = bindToResolvedWriteTarget(appendSeparator: false)
-            } else {
+            } else if inProgressCaptureFilename == nil {
                 beginFreshCaptureSession(clearText: true)
             }
         }
