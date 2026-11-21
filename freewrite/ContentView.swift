@@ -2460,9 +2460,15 @@ struct ContentView: View {
         guard var trash = historyTrash,
               trashDestinationID == destinationStore.activeDestinationId else { return }
         do {
-            try trash.restore()
+            let restoredURLs = try trash.restore(finalizeCaptureDrafts: true)
             historyTrash = nil
-            if let entry = trashedEntry,
+            var restoredEntry = trashedEntry
+            if let draft = trashedEntry,
+               DestinationWriteTarget.isCaptureDraftFilename(draft.filename),
+               let url = restoredURLs.first(where: { $0.pathExtension == "md" }) {
+                restoredEntry = humanEntry(from: url, allowNonCanonical: true)?.entry
+            }
+            if let entry = restoredEntry,
                !entries.contains(where: { $0.id == entry.id }) {
                 entries.insert(entry, at: min(trashedEntryIndex, entries.count))
             }

@@ -34,14 +34,30 @@ struct HistoryTrash {
         items.append(Item(originalURL: url, trashedURL: trashedURL))
     }
 
-    mutating func restore(fileManager: FileManager = .default) throws {
+    @discardableResult
+    mutating func restore(finalizeCaptureDrafts: Bool = false, fileManager: FileManager = .default) throws -> [URL] {
+        var restoredURLs: [URL] = []
         while let item = items.last {
+            var destinationURL = item.originalURL
+            if finalizeCaptureDrafts,
+               DestinationWriteTarget.isCaptureDraftFilename(item.originalURL.lastPathComponent) {
+                let content = try String(contentsOf: item.trashedURL, encoding: .utf8)
+                let basename = DestinationWriteTarget.sanitizedTitleBasename(from: content)
+                    ?? DestinationWriteTarget.dateCaptureBasename()
+                let filename = DestinationWriteTarget.uniqueMarkdownFilename(
+                    preferredBasename: basename,
+                    documentsURL: item.originalURL.deletingLastPathComponent()
+                )
+                destinationURL = item.originalURL.deletingLastPathComponent().appendingPathComponent(filename)
+            }
             if isUneditedReplacement(at: item.originalURL, fileManager: fileManager) {
                 try fileManager.removeItem(at: item.originalURL)
                 emptyReplacement = nil
             }
-            try fileManager.moveItem(at: item.trashedURL, to: item.originalURL)
+            try fileManager.moveItem(at: item.trashedURL, to: destinationURL)
             items.removeLast()
+            restoredURLs.append(destinationURL)
         }
+        return restoredURLs
     }
 }

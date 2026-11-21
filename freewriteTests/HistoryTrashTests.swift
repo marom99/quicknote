@@ -3,6 +3,39 @@ import Testing
 @testable import freewrite
 
 struct HistoryTrashTests {
+    @Test func undoFinalizesTitleDraftToVisibleUniqueFilename() throws {
+        try withDirectory { directory in
+            let draft = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+            let occupied = directory.appendingPathComponent("My title.md")
+            try "Existing".write(to: occupied, atomically: true, encoding: .utf8)
+            try "My title\n\nBody".write(to: draft, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(draft)
+            defer { try? trash.restore() }
+            let restored = try trash.restore(finalizeCaptureDrafts: true)
+            let url = try #require(restored.first)
+            #expect(!DestinationWriteTarget.isCaptureDraftFilename(url.lastPathComponent))
+            #expect(url.lastPathComponent == "My title-2.md")
+            #expect(try String(contentsOf: url, encoding: .utf8) == "My title\n\nBody")
+            #expect(try String(contentsOf: occupied, encoding: .utf8) == "Existing")
+            #expect(!FileManager.default.fileExists(atPath: draft.path))
+        }
+    }
+
+    @Test func undoEmptyTitleDraftUsesVisibleFallbackFilename() throws {
+        try withDirectory { directory in
+            let draft = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+            try "".write(to: draft, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(draft)
+            defer { try? trash.restore() }
+            let restored = try trash.restore(finalizeCaptureDrafts: true)
+            let url = try #require(restored.first)
+            #expect(!url.lastPathComponent.hasPrefix("."))
+            #expect(try Data(contentsOf: url).isEmpty)
+        }
+    }
+
     @Test func undoReplacesOnlyTrackedUneditedEmptyFile() throws {
         try withDirectory { directory in
             let url = directory.appendingPathComponent("rolling.md")
