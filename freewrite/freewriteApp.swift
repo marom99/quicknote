@@ -249,9 +249,10 @@ struct freewriteApp: App {
         .windowResizability(.contentMinSize)
 
         MenuBarExtra {
-            Button("Quick Capture  \(CaptureHotKey.standard.displayString)") {
+            Button("Quick Capture") {
                 QuickCaptureCenter.shared.trigger()
             }
+            .keyboardShortcut("n", modifiers: [.control, .option, .command])
             Button("Show Window") {
                 QuickCaptureCenter.shared.showWindow()
             }
@@ -273,7 +274,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         WindowChrome.startObserving()
 
-        if let window = NSApplication.shared.windows.first {
+        if let window = NSApplication.shared.windows.first(where: {
+            $0.styleMask.contains(.titled) && !$0.className.contains("NSStatusBar")
+        }) {
             // Ensure window starts in windowed mode
             if window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
