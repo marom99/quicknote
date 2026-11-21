@@ -1589,7 +1589,7 @@ struct ContentView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
+                        .id("\(selectedFont)-\(fontSize)")
                         .colorScheme(colorScheme)
                         .transaction { $0.animation = nil }
                         .onAppear {
@@ -1677,6 +1677,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringThemeToggle ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("themeToggleButton")
                             .onHover { hovering in
                                 isHoveringThemeToggle = hovering
                                 isHoveringBottomNav = hovering
@@ -1698,6 +1699,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringClock ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("historyButton")
                             .onHover { hovering in
                                 isHoveringClock = hovering
                                 isHoveringBottomNav = hovering
