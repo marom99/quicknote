@@ -332,6 +332,8 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
+An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
+
 ## Permissions
 
 Required entitlements in `freewrite.entitlements`:

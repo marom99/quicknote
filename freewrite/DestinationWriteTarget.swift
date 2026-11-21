@@ -225,6 +225,18 @@ enum DestinationWriteTarget {
 
     // MARK: - Resolve write target
 
+    static func resolveForUnboundEdit(
+        content: String,
+        destination: SaveDestination,
+        documentsURL: URL,
+        now: Date = Date()
+    ) -> ResolvedTarget? {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let target = resolve(for: destination, documentsURL: documentsURL, now: now),
+              target.fileExists else { return nil }
+        return target
+    }
+
     /// Resolves the file the editor should bind to for Rolling / Existing modes.
     /// Creates the file when missing (except Existing soft-fail when no filename is configured).
     static func resolve(

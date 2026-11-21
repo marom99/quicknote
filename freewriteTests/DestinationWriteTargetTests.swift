@@ -3,6 +3,63 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func unboundEditRecreatesDeletedTarget(mode: DestinationSaveMode) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: mode, existingNoteFilename: "journal.md"
+        )
+        let now = Date()
+        let original = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now
+        ))
+        try "old note".write(to: original.fileURL, atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: original.fileURL)
+
+        for content in ["", " \n\t"] {
+            #expect(DestinationWriteTarget.resolveForUnboundEdit(
+                content: content, destination: destination, documentsURL: directory, now: now
+            ) == nil)
+            #expect(!FileManager.default.fileExists(atPath: original.fileURL.path))
+        }
+        let recreated = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "new note", destination: destination, documentsURL: directory, now: now
+        ))
+        #expect(recreated.filename == original.filename)
+        #expect(recreated.entryId == original.entryId)
+        #expect(recreated.didCreate)
+        try "new note".write(to: recreated.fileURL, atomically: true, encoding: .utf8)
+        let again = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "more text", destination: destination, documentsURL: directory, now: now
+        ))
+        #expect(!again.didCreate)
+        #expect(try String(contentsOf: again.fileURL, encoding: .utf8) == "new note")
+    }
+
+    @Test func unboundEditRejectsInvalidAndUnavailableTargets() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: .existing, existingNoteFilename: "journal.md"
+        )
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: destination, documentsURL: directory
+        ) == nil)
+        var invalid = destination
+        for filename in [nil, "../journal.md"] as [String?] {
+            invalid.existingNoteFilename = filename
+            #expect(DestinationWriteTarget.resolveForUnboundEdit(
+                content: "text", destination: invalid, documentsURL: directory
+            ) == nil)
+        }
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: .makeDefault(), documentsURL: directory
+        ) == nil)
+    }
+
     @Test func dailyAnchorIsStartOfDay() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

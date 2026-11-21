@@ -1063,8 +1063,7 @@ struct ContentView: View {
             return true
         }
 
-        // Missing path: stay unbound so typing cannot silently recreate the file
-        // (Existing soft-fail, or Rolling create failure). Settings keep the path.
+        // Missing paths stay unbound until a nonempty edit resolves the target.
         guard target.fileExists else {
             selectedEntryId = nil
             currentVideoURL = nil
@@ -1919,6 +1918,20 @@ struct ContentView: View {
                let currentEntry = entries.first(where: { $0.id == currentId }),
                currentEntry.entryType == .text {
                 saveEntry(entry: currentEntry)
+            } else if selectedEntryId == nil,
+                      let destination = destinationStore.activeDestination,
+                      let documentsDirectory = getDocumentsDirectory(),
+                      let target = DestinationWriteTarget.resolveForUnboundEdit(
+                        content: text,
+                        destination: destination,
+                        documentsURL: documentsDirectory
+                      ) {
+                let entry = entryForResolvedTarget(target)
+                if !entries.contains(where: { $0.id == entry.id }) {
+                    entries.insert(entry, at: 0)
+                }
+                selectedEntryId = entry.id
+                saveEntry(entry: entry)
             }
         }
         .confirmationDialog(
@@ -2374,10 +2387,8 @@ struct ContentView: View {
                     if let firstEntry = entries.first {
                         selectedEntryId = firstEntry.id
                         loadEntry(entry: firstEntry)
-                    } else if isCapturePerSessionMode {
-                        beginFreshCaptureSession(clearText: true)
                     } else {
-                        createNewEntry()
+                        beginFreshCaptureSession(clearText: true)
                     }
                 }
             }
