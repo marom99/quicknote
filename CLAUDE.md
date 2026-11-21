@@ -314,6 +314,7 @@ struct VideoPlayerView: View {
 - Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
 - Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor. The current ContentView has no recording overlay presentation path; if recording is restored, skip capture while that overlay is visible.
 - `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
+- Before capture, native editor input is suspended and first responder resigned; capture runs before raising the window. Input resumes only after the SwiftUI editor update applies the new capture text, preventing immediate typing from copying stale native text into the new note.
 
 ## Entry Loading Logic
 

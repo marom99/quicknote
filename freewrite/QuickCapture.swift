@@ -83,8 +83,8 @@ final class QuickCaptureCenter {
         editors[id] = editor
         if hasPendingCapture && editor.isAvailable() {
             hasPendingCapture = false
-            editor.show()
             editor.capture()
+            editor.show()
         }
     }
 
@@ -96,8 +96,8 @@ final class QuickCaptureCenter {
         activate()
         let available = editors.values.filter { $0.isAvailable() }
         if let editor = available.first(where: { $0.isKey() }) ?? available.first {
-            editor.show()
             if capture { editor.capture() }
+            editor.show()
         } else {
             hasPendingCapture = hasPendingCapture || capture
             if let openWindow { openWindow() } else { fallback() }
@@ -128,7 +128,10 @@ struct QuickCaptureWindowAccessor: NSViewRepresentable {
                         window?.deminiaturize(nil)
                         window?.makeKeyAndOrderFront(nil)
                     },
-                    capture: { [weak self] in self?.capture() }
+                    capture: { [weak self, weak window] in
+                        if let window { QuickCaptureInputGate.suspend(in: window) }
+                        self?.capture()
+                    }
                 ))
             }
         }
@@ -144,6 +147,26 @@ struct QuickCaptureWindowAccessor: NSViewRepresentable {
 
     static func dismantleNSView(_ view: HostView, coordinator: ()) {
         QuickCaptureCenter.shared.unregister(id: view.id)
+    }
+}
+
+@MainActor
+enum QuickCaptureInputGate {
+    static func suspend(in window: NSWindow) {
+        window.makeFirstResponder(nil)
+        if let contentView = window.contentView { suspendEditors(in: contentView) }
+    }
+
+    private static func suspendEditors(in view: NSView) {
+        if let editor = view as? NSTextView, !editor.isFieldEditor {
+            editor.isEditable = false
+        }
+        for child in view.subviews { suspendEditors(in: child) }
+    }
+
+    static func resume(_ editor: NSTextView) {
+        editor.isEditable = true
+        editor.window?.makeFirstResponder(editor)
     }
 }
 

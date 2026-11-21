@@ -26,7 +26,7 @@ struct QuickCaptureTests {
                 capture: { events.append(key ? "capture-key" : "capture-other") }))
         }
         center.trigger()
-        #expect(events == ["activate", "show-key", "capture-key"])
+        #expect(events == ["activate", "capture-key", "show-key"])
         #expect(!center.hasPendingCapture)
     }
 
@@ -44,6 +44,24 @@ struct QuickCaptureTests {
         center.register(id: id, editor: editor)
         #expect(captures == 1)
         #expect(!center.hasPendingCapture)
+    }
+
+    @MainActor @Test func inputIsBlockedUntilClearedTextIsApplied() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let editor = NSTextView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(editor)
+        editor.string = "previous capture"
+        window.makeFirstResponder(editor)
+        QuickCaptureInputGate.suspend(in: window)
+        #expect(!editor.isEditable)
+        #expect(window.firstResponder !== editor)
+        #expect(editor.string == "previous capture")
+        editor.string = ""
+        QuickCaptureInputGate.resume(editor)
+        #expect(editor.isEditable)
+        #expect(window.firstResponder === editor)
+        #expect(editor.string.isEmpty)
     }
 
     @MainActor @Test func closedEditorsUseFallbackAndKeepPendingRequest() {

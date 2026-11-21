@@ -181,7 +181,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastFocusRequest = focusRequest
             DispatchQueue.main.async { [weak scrollView] in
                 guard let textView = scrollView?.documentView as? NSTextView else { return }
-                textView.window?.makeFirstResponder(textView)
+                QuickCaptureInputGate.resume(textView)
             }
         }
 
