@@ -11,13 +11,13 @@ struct DestinationWriteTargetTests {
         coordinator.textView = textView
         textView.string = "Restored note\nTyped text 📝"
         textView.setSelectedRange(NSRange(location: 1, length: 0))
-        coordinator.applyCaretEndRequest(nil)
+        #expect(!coordinator.applyCaretEndRequest(nil))
         #expect(textView.selectedRange().location == 1)
         let request = UUID()
-        coordinator.applyCaretEndRequest(request)
+        #expect(coordinator.applyCaretEndRequest(request))
         #expect(textView.selectedRange() == NSRange(location: (textView.string as NSString).length, length: 0))
         textView.setSelectedRange(NSRange(location: 2, length: 0))
-        coordinator.applyCaretEndRequest(request)
+        #expect(!coordinator.applyCaretEndRequest(request))
         #expect(textView.selectedRange().location == 2)
         textView.string = ""
         coordinator.applyCaretEndRequest(UUID())

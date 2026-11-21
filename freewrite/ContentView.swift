@@ -80,7 +80,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var scrollRequest: EditorScrollRequest?
 
     let editorID: UUID?
-    let caretEndRequest: UUID?
+    @Binding var caretEndRequest: UUID?
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -172,7 +172,14 @@ struct FreewriteTextEditor: NSViewRepresentable {
             )
         }
 
-        context.coordinator.applyCaretEndRequest(caretEndRequest)
+        if context.coordinator.applyCaretEndRequest(caretEndRequest) {
+            let appliedRequest = caretEndRequest
+            DispatchQueue.main.async {
+                if caretEndRequest == appliedRequest {
+                    caretEndRequest = nil
+                }
+            }
+        }
 
         if let request = scrollRequest, request != context.coordinator.lastAppliedScrollRequest {
             context.coordinator.scrollTo(fraction: request.fraction)
@@ -246,12 +253,14 @@ struct FreewriteTextEditor: NSViewRepresentable {
             lastConfiguredEditorID = editorID
         }
 
-        func applyCaretEndRequest(_ request: UUID?) {
-            guard let request, request != lastAppliedCaretEndRequest, let textView else { return }
+        @discardableResult
+        func applyCaretEndRequest(_ request: UUID?) -> Bool {
+            guard let request, request != lastAppliedCaretEndRequest, let textView else { return false }
             let range = NSRange(location: (textView.string as NSString).length, length: 0)
             textView.setSelectedRange(range)
             textView.scrollRangeToVisible(range)
             lastAppliedCaretEndRequest = request
+            return true
         }
 
         func startObservingBoundsChanges() {
@@ -1574,7 +1583,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
-                        caretEndRequest: editorCaretEndRequest,
+                        caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
