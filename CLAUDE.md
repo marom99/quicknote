@@ -332,6 +332,8 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging.
+
 ## Permissions
 
 Required entitlements in `freewrite.entitlements`:

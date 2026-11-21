@@ -381,6 +381,7 @@ struct ContentView: View {
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
+    @State private var noteSaveState = NoteSaveState()
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var showingDestinationSettings = false
@@ -1987,7 +1988,7 @@ struct ContentView: View {
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            text = try noteSaveState.save(text, to: fileURL)
             print("Successfully saved entry: \(entry.filename)")
             if updatePreview {
                 updatePreviewText(for: entry)
@@ -2027,6 +2028,7 @@ struct ContentView: View {
                     let rawText = try String(contentsOf: fileURL, encoding: .utf8)
                     // Strip legacy leading newlines from older entries
                     text = String(rawText.drop(while: { $0 == "\n" }))
+                    noteSaveState.didLoad(text, from: fileURL)
                     print("Successfully loaded entry: \(entry.filename)")
                 } else {
                     // Soft-fail missing file (e.g. Existing note removed from disk).
