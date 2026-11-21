@@ -776,8 +776,13 @@ struct ContentView: View {
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(filename)
         if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                return
+            }
         }
+        noteSaveState.forget(fileURL)
     }
 
     private func removeEntry(withFilename filename: String) {
@@ -797,11 +802,18 @@ struct ContentView: View {
         guard fileManager.fileExists(atPath: sourceURL.path) else { return }
 
         if fileManager.fileExists(atPath: destinationURL.path) {
-            try? fileManager.removeItem(at: destinationURL)
+            do {
+                try fileManager.removeItem(at: destinationURL)
+                noteSaveState.forget(destinationURL)
+            } catch {
+                return
+            }
         }
 
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            noteSaveState.forget(sourceURL)
+            noteSaveState.forget(destinationURL)
         } catch {
             print("Error renaming capture file: \(error)")
         }
@@ -2359,6 +2371,7 @@ struct ContentView: View {
 
         do {
             try fileManager.removeItem(at: fileURL)
+            noteSaveState.forget(fileURL)
             print("Successfully deleted file: \(entry.filename)")
 
             // If this is a video entry, also delete the video file

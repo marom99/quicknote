@@ -7,6 +7,10 @@ struct NoteSaveState {
         loadedTextByURL[url.standardizedFileURL] = text
     }
 
+    mutating func forget(_ url: URL) {
+        loadedTextByURL.removeValue(forKey: url.standardizedFileURL)
+    }
+
     mutating func save(_ text: String, to url: URL) throws -> String {
         if loadedTextByURL[url.standardizedFileURL] == text {
             let diskText = try String(contentsOf: url, encoding: .utf8)

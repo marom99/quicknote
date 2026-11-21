@@ -3,6 +3,40 @@ import Testing
 @testable import freewrite
 
 struct NoteSaveStateTests {
+    @Test func deletedDateCaptureCanRestoreIdenticalTextAtSameTimestamp() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let basename = DestinationWriteTarget.dateCaptureBasename(now: Date(timeIntervalSince1970: 1_800_000_000))
+        let filename = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        let url = directory.appendingPathComponent(filename)
+        var state = NoteSaveState()
+        _ = try state.save("Restored capture", to: url)
+        try FileManager.default.removeItem(at: url)
+        state.forget(url)
+        let restoredFilename = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        #expect(restoredFilename == filename)
+        _ = try state.save("Restored capture", to: directory.appendingPathComponent(restoredFilename))
+        _ = try state.save("Restored capture", to: url)
+        #expect(try String(contentsOf: url, encoding: .utf8) == "Restored capture")
+    }
+
+    @Test func renamedCaptureDoesNotLeaveBaselineAtReusedURL() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("draft.md")
+        let destination = directory.appendingPathComponent("title.md")
+        var state = NoteSaveState()
+        _ = try state.save("Capture text", to: source)
+        try FileManager.default.moveItem(at: source, to: destination)
+        state.forget(source)
+        state.forget(destination)
+        _ = try state.save("Capture text", to: source)
+        #expect(try String(contentsOf: source, encoding: .utf8) == "Capture text")
+        #expect(try String(contentsOf: destination, encoding: .utf8) == "Capture text")
+    }
+
     @Test func unchangedEditorPreservesExternalEditsOnRepeatedSaves() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
