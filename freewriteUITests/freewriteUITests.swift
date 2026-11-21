@@ -33,6 +33,22 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testTypingAfterCancelingDestinationSettings() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.menuButtons.firstMatch.click()
+        app.menuItems["Destination settings…"].click()
+        let name = app.textFields["Display name"]
+        name.click()
+        name.typeText(" edited")
+        app.buttons["Cancel"].click()
+
+        app.typeText("Typing after Cancel")
+
+        XCTAssertEqual(app.textViews["mainEditor"].value as? String, "Typing after Cancel")
+    }
+
+    @MainActor
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()

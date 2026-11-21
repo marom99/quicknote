@@ -112,14 +112,57 @@ final class FreewriteEditorTextView: NSTextView {
         guard allowsAutomaticFocus, let window, window.isKeyWindow,
               !isHiddenOrHasHiddenAncestor, window.attachedSheet == nil else { return }
         let responder = window.firstResponder
-        if let textView = responder as? NSTextView, textView.window === window { return }
-        if let textField = responder as? NSTextField, textField.window === window { return }
+        if let textView = responder as? NSTextView, textView.window === window,
+           !textView.isHiddenOrHasHiddenAncestor {
+            if !textView.isFieldEditor { return }
+            if let owner = textView.delegate as? NSView,
+               owner.window === window, !owner.isHiddenOrHasHiddenAncestor { return }
+            if hasLiveFieldEditorOwner(textView, in: window.contentView) { return }
+        }
+        if let textField = responder as? NSTextField, textField.window === window,
+           !textField.isHiddenOrHasHiddenAncestor { return }
         window.makeFirstResponder(self)
+    }
+
+    private func hasLiveFieldEditorOwner(_ editor: NSTextView, in view: NSView?) -> Bool {
+        guard let view, !view.isHiddenOrHasHiddenAncestor else { return false }
+        if let field = view as? NSTextField, field.currentEditor() === editor { return true }
+        return view.subviews.contains { hasLiveFieldEditorOwner(editor, in: $0) }
     }
 
     deinit {
         if let keyWindowObserver {
             NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+    }
+}
+
+struct RailRemovalObserver: NSViewRepresentable {
+    let onRemoval: () -> Void
+
+    func makeNSView(context: Context) -> RemovalView {
+        let view = RemovalView()
+        view.onRemoval = onRemoval
+        return view
+    }
+
+    func updateNSView(_ nsView: RemovalView, context: Context) {
+        nsView.onRemoval = onRemoval
+    }
+
+    final class RemovalView: NSView {
+        var onRemoval: (() -> Void)?
+        private var wasInWindow = false
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil {
+                wasInWindow = true
+            } else if wasInWindow {
+                wasInWindow = false
+                let onRemoval = onRemoval
+                DispatchQueue.main.async { onRemoval?() }
+            }
         }
     }
 }
@@ -1303,6 +1346,10 @@ struct ContentView: View {
         pendingDestinationSettingsCloseAction = nil
         showingDiscardDestinationSettingsConfirmation = false
 
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showingDestinationSettings = false
+        }
+
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
         }
@@ -1926,16 +1973,18 @@ struct ContentView: View {
                     .scrollIndicators(.never)
                 }
                 .frame(width: 200)
+                .background(RailRemovalObserver { editorFocusRequest = UUID() })
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
-                .transition(.move(edge: .trailing))
+                .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .identity))
             }
 
             if showingDestinationSettings {
                 Divider()
                 destinationSettingsRail(textColor: textColor)
                     .frame(width: 260)
+                    .background(RailRemovalObserver { editorFocusRequest = UUID() })
                     .background(Color(colorScheme == .light ? .white : NSColor.black))
-                    .transition(.move(edge: .trailing))
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .identity))
             }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,

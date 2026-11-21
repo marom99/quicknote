@@ -14,6 +14,8 @@ private final class EditorFocusTestWindow: NSWindow {
     override var isKeyWindow: Bool { keyForTesting }
 }
 
+private final class EditorFocusTestField: NSTextField, NSTextViewDelegate {}
+
 struct freewriteTests {
 
     @Test @MainActor func automaticEditorFocusRespectsOtherRespondersAndRails() async {
@@ -67,6 +69,53 @@ struct freewriteTests {
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    }
+
+    @Test @MainActor func staleFieldEditorDoesNotBlockRailRemovalFocus() async {
+        let window = EditorFocusTestWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
+                                           styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let editor = FreewriteEditorTextView(frame: .zero)
+        let owner = EditorFocusTestField(frame: .zero)
+        let fieldEditor = NSTextView(frame: .zero)
+        fieldEditor.isFieldEditor = true
+        fieldEditor.delegate = owner
+        let rail = RailRemovalObserver.RemovalView()
+        window.contentView?.addSubview(editor)
+        window.contentView?.addSubview(owner)
+        window.contentView?.addSubview(fieldEditor)
+        window.contentView?.addSubview(rail)
+        window.makeFirstResponder(fieldEditor)
+
+        editor.focusIfAvailable()
+        #expect(window.firstResponder === fieldEditor)
+
+        editor.allowsAutomaticFocus = false
+        editor.allowsAutomaticFocus = true
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(window.firstResponder === fieldEditor)
+
+        owner.isHidden = true
+        editor.focusIfAvailable()
+        #expect(window.firstResponder === editor)
+
+        owner.isHidden = false
+        owner.removeFromSuperview()
+        window.contentView?.addSubview(fieldEditor)
+        fieldEditor.delegate = owner
+        window.makeFirstResponder(fieldEditor)
+        #expect(fieldEditor.window === window)
+        rail.onRemoval = { editor.requestAutomaticFocus() }
+        rail.removeFromSuperview()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                DispatchQueue.main.async { continuation.resume() }
+            }
+        }
+        #expect(window.firstResponder === editor)
     }
 
 }
