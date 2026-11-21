@@ -333,6 +333,8 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
+`saveEntry` skips the write when the file already matches the editor text (ignoring the leading newlines `loadEntry` strips), so selecting or leaving a note in History without editing it never changes its modification time, which non-canonical History rows display.
+
 ## Permissions
 
 Required entitlements in `freewrite.entitlements`:
