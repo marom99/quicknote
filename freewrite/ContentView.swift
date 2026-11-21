@@ -383,6 +383,7 @@ struct ContentView: View {
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
+    @State private var loadedTextBaseline: LoadedTextBaseline? = nil
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var showingDestinationSettings = false
@@ -1999,7 +2000,12 @@ struct ContentView: View {
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
         // Selecting or leaving a note without editing it must not touch the file (or its mtime).
-        if let diskText = try? String(contentsOf: fileURL, encoding: .utf8), diskText == text {
+        if let diskText = try? String(contentsOf: fileURL, encoding: .utf8),
+           DestinationWriteTarget.isUnchangedSave(
+               editorText: text,
+               diskText: diskText,
+               baseline: loadedTextBaseline?.filename == entry.filename ? loadedTextBaseline : nil
+           ) {
             return
         }
         
@@ -2043,7 +2049,9 @@ struct ContentView: View {
                 if fileManager.fileExists(atPath: fileURL.path) {
                     let rawText = try String(contentsOf: fileURL, encoding: .utf8)
                     // Strip legacy leading newlines from older entries
-                    text = String(rawText.drop(while: { $0 == "\n" }))
+                    let shownText = String(rawText.drop(while: { $0 == "\n" }))
+                    loadedTextBaseline = LoadedTextBaseline(filename: entry.filename, diskText: rawText, editorText: shownText)
+                    text = shownText
                     print("Successfully loaded entry: \(entry.filename)")
                 } else {
                     // Soft-fail missing file (e.g. Existing note removed from disk).

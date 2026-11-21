@@ -319,3 +319,20 @@ enum DestinationWriteTarget {
         )
     }
 }
+
+/// What `loadEntry` read from disk and showed in the editor (legacy leading newlines stripped).
+struct LoadedTextBaseline: Equatable {
+    let filename: String
+    let diskText: String
+    let editorText: String
+}
+
+extension DestinationWriteTarget {
+    /// True when writing `editorText` would not reflect a user edit: the file already holds it, or the
+    /// file and editor are exactly as `loadEntry` left them.
+    static func isUnchangedSave(editorText: String, diskText: String, baseline: LoadedTextBaseline?) -> Bool {
+        if diskText == editorText { return true }
+        guard let baseline else { return false }
+        return baseline.diskText == diskText && baseline.editorText == editorText
+    }
+}

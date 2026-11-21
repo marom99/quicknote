@@ -241,3 +241,28 @@ struct DestinationWriteTargetTests {
         #expect(unique == "note-2.md")
     }
 }
+
+struct UnchangedSaveTests {
+    @Test func identicalTextIsUnchanged() {
+        #expect(DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "Ideas", baseline: nil))
+    }
+
+    @Test func legacyNoteLoadedWithStrippedNewlinesIsUnchanged() {
+        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\n\nIdeas", editorText: "Ideas")
+        #expect(DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\n\nIdeas", baseline: baseline))
+    }
+
+    @Test func editAfterLoadIsChanged() {
+        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\n\nIdeas", editorText: "Ideas")
+        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas!", diskText: "\n\nIdeas", baseline: baseline))
+    }
+
+    @Test func deletingTypedLeadingNewlinesIsChanged() {
+        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\nIdeas", baseline: nil))
+    }
+
+    @Test func externalChangeSinceLoadIsChanged() {
+        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\nIdeas", editorText: "Ideas")
+        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\nIdeas v2", baseline: baseline))
+    }
+}
