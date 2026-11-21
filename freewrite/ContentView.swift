@@ -76,7 +76,13 @@ struct EditorScrollRequest: Equatable {
 }
 
 final class FreewriteEditorTextView: NSTextView {
-    var allowsAutomaticFocus = true
+    var allowsAutomaticFocus = true {
+        didSet {
+            if allowsAutomaticFocus && !oldValue {
+                requestAutomaticFocus()
+            }
+        }
+    }
     private var keyWindowObserver: NSObjectProtocol?
 
     override func viewDidMoveToWindow() {
@@ -93,6 +99,10 @@ final class FreewriteEditorTextView: NSTextView {
         ) { [weak self] _ in
             self?.focusIfAvailable()
         }
+        requestAutomaticFocus()
+    }
+
+    func requestAutomaticFocus() {
         DispatchQueue.main.async { [weak self] in
             self?.focusIfAvailable()
         }
@@ -102,7 +112,8 @@ final class FreewriteEditorTextView: NSTextView {
         guard allowsAutomaticFocus, let window, window.isKeyWindow,
               !isHiddenOrHasHiddenAncestor, window.attachedSheet == nil else { return }
         let responder = window.firstResponder
-        guard responder == nil || responder === window || responder === window.contentView else { return }
+        if let textView = responder as? NSTextView, textView.window === window { return }
+        if let textField = responder as? NSTextField, textField.window === window { return }
         window.makeFirstResponder(self)
     }
 
@@ -119,6 +130,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
     let editorID: UUID?
     let allowsAutomaticFocus: Bool
+    let focusRequest: UUID
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -197,6 +209,10 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
         if let textView = context.coordinator.textView {
             (textView as? FreewriteEditorTextView)?.allowsAutomaticFocus = allowsAutomaticFocus
+            if context.coordinator.lastFocusRequest != focusRequest {
+                context.coordinator.lastFocusRequest = focusRequest
+                (textView as? FreewriteEditorTextView)?.requestAutomaticFocus()
+            }
             textView.textContainer?.lineFragmentPadding = editorNativeTextPadding
             textView.textContainerInset = NSSize(
                 width: max(editorInset - editorNativeTextPadding, 0),
@@ -235,6 +251,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
         var lastConfiguredEditorID: UUID?
+        var lastFocusRequest: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
@@ -421,6 +438,7 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorFocusRequest = UUID()
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var hoveredEntryId: UUID? = nil
@@ -1605,6 +1623,7 @@ struct ContentView: View {
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
                         allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
+                        focusRequest: editorFocusRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
@@ -2084,6 +2103,7 @@ struct ContentView: View {
     }
     
     private func createNewEntry() {
+        editorFocusRequest = UUID()
         // Rolling / Existing: re-bind to current period/target and append a session separator.
         if activeSaveMode == .rolling || activeSaveMode == .existing {
             if let currentId = selectedEntryId,

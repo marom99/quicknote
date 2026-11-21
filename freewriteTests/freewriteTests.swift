@@ -16,7 +16,7 @@ private final class EditorFocusTestWindow: NSWindow {
 
 struct freewriteTests {
 
-    @Test @MainActor func automaticEditorFocusRespectsOtherRespondersAndRails() {
+    @Test @MainActor func automaticEditorFocusRespectsOtherRespondersAndRails() async {
         let window = EditorFocusTestWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -40,6 +40,25 @@ struct freewriteTests {
         editor.focusIfAvailable()
         #expect(window.firstResponder !== editor)
 
+        let button = NSButton(frame: NSRect(x: 210, y: 0, width: 80, height: 24))
+        window.contentView?.addSubview(button)
+        window.makeFirstResponder(button)
+        editor.allowsAutomaticFocus = true
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(window.firstResponder === editor)
+
+        editor.allowsAutomaticFocus = false
+        window.makeFirstResponder(field)
+        let railFieldResponder = window.firstResponder
+        editor.allowsAutomaticFocus = true
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(window.firstResponder === railFieldResponder)
+
+        window.makeFirstResponder(nil)
         editor.allowsAutomaticFocus = true
         window.keyForTesting = false
         editor.focusIfAvailable()
