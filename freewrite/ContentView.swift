@@ -75,11 +75,50 @@ struct EditorScrollRequest: Equatable {
     let fraction: CGFloat
 }
 
+final class FreewriteEditorTextView: NSTextView {
+    var allowsAutomaticFocus = true
+    private var keyWindowObserver: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+        keyWindowObserver = nil
+        guard let window else { return }
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.focusIfAvailable()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.focusIfAvailable()
+        }
+    }
+
+    func focusIfAvailable() {
+        guard allowsAutomaticFocus, let window, window.isKeyWindow,
+              !isHiddenOrHasHiddenAncestor, window.attachedSheet == nil else { return }
+        let responder = window.firstResponder
+        guard responder == nil || responder === window || responder === window.contentView else { return }
+        window.makeFirstResponder(self)
+    }
+
+    deinit {
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+    }
+}
+
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
 
     let editorID: UUID?
+    let allowsAutomaticFocus: Bool
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -108,7 +147,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
         )
         scrollView.contentView.postsBoundsChangedNotifications = true
 
-        let textView = NSTextView(frame: .zero)
+        let textView = FreewriteEditorTextView(frame: .zero)
+        textView.allowsAutomaticFocus = allowsAutomaticFocus
+        textView.setAccessibilityIdentifier("mainEditor")
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isEditable = true
@@ -155,6 +196,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         )
 
         if let textView = context.coordinator.textView {
+            (textView as? FreewriteEditorTextView)?.allowsAutomaticFocus = allowsAutomaticFocus
             textView.textContainer?.lineFragmentPadding = editorNativeTextPadding
             textView.textContainerInset = NSSize(
                 width: max(editorInset - editorNativeTextPadding, 0),
@@ -1562,6 +1604,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
+                        allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,

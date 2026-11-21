@@ -23,6 +23,16 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testTypingImmediatelyAfterLaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.typeText("Launch focus regression")
+
+        XCTAssertEqual(app.textViews["mainEditor"].value as? String, "Launch focus regression")
+    }
+
+    @MainActor
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
