@@ -407,6 +407,7 @@ struct ContentView: View {
     @State private var historyTrash: HistoryTrash? = nil
     @State private var trashedEntry: HumanEntry? = nil
     @State private var trashedEntryIndex = 0
+    @State private var trashedEntryWasSelected = false
     @State private var trashDestinationID: UUID? = nil
     @State private var trashNoticeID = UUID()
     @State private var trashError: String? = nil
@@ -2408,6 +2409,7 @@ struct ContentView: View {
             historyTrash = trash
             trashedEntry = entry
             trashedEntryIndex = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
+            trashedEntryWasSelected = selectedEntryId == entry.id
             trashDestinationID = destinationStore.activeDestinationId
             let noticeID = UUID()
             trashNoticeID = noticeID
@@ -2460,6 +2462,9 @@ struct ContentView: View {
         guard var trash = historyTrash,
               trashDestinationID == destinationStore.activeDestinationId else { return }
         do {
+            if trashedEntryWasSelected, inProgressCaptureFilename != nil {
+                finalizeCaptureSession()
+            }
             let restoredURLs = try trash.restore(finalizeCaptureDrafts: true)
             historyTrash = nil
             var restoredEntry = trashedEntry
@@ -2468,9 +2473,18 @@ struct ContentView: View {
                let url = restoredURLs.first(where: { $0.pathExtension == "md" }) {
                 restoredEntry = humanEntry(from: url, allowNonCanonical: true)?.entry
             }
-            if let entry = restoredEntry,
-               !entries.contains(where: { $0.id == entry.id }) {
-                entries.insert(entry, at: min(trashedEntryIndex, entries.count))
+            if let entry = restoredEntry {
+                if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    entries[index] = entry
+                } else {
+                    entries.insert(entry, at: min(trashedEntryIndex, entries.count))
+                }
+                if trashedEntryWasSelected {
+                    isLoadingEntry = true
+                    selectedEntryId = entry.id
+                    loadEntry(entry: entry)
+                    isLoadingEntry = false
+                }
             }
             trashedEntry = nil
         } catch {
