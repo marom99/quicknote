@@ -1,8 +1,29 @@
 import Foundation
+import AppKit
+import SwiftUI
 import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test @MainActor func mergedEditCaretRequestMovesToEndOnlyOnce() {
+        let coordinator = FreewriteTextEditor.Coordinator(text: .constant(""), onScrollMetricsChange: { _ in })
+        let textView = NSTextView()
+        coordinator.textView = textView
+        textView.string = "Restored note\nTyped text 📝"
+        textView.setSelectedRange(NSRange(location: 1, length: 0))
+        coordinator.applyCaretEndRequest(nil)
+        #expect(textView.selectedRange().location == 1)
+        let request = UUID()
+        coordinator.applyCaretEndRequest(request)
+        #expect(textView.selectedRange() == NSRange(location: (textView.string as NSString).length, length: 0))
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        coordinator.applyCaretEndRequest(request)
+        #expect(textView.selectedRange().location == 2)
+        textView.string = ""
+        coordinator.applyCaretEndRequest(UUID())
+        #expect(textView.selectedRange() == NSRange(location: 0, length: 0))
+    }
+
     @Test(arguments: [DestinationSaveMode.existing, .rolling])
     func directoryAtTargetPathIsRejected(mode: DestinationSaveMode) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

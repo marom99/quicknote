@@ -80,6 +80,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var scrollRequest: EditorScrollRequest?
 
     let editorID: UUID?
+    let caretEndRequest: UUID?
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -171,6 +172,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
             )
         }
 
+        context.coordinator.applyCaretEndRequest(caretEndRequest)
+
         if let request = scrollRequest, request != context.coordinator.lastAppliedScrollRequest {
             context.coordinator.scrollTo(fraction: request.fraction)
             context.coordinator.lastAppliedScrollRequest = request
@@ -193,6 +196,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
         var lastConfiguredEditorID: UUID?
+        var lastAppliedCaretEndRequest: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
@@ -240,6 +244,14 @@ struct FreewriteTextEditor: NSViewRepresentable {
             textView.selectedRanges = selectedRanges
             isUpdatingText = false
             lastConfiguredEditorID = editorID
+        }
+
+        func applyCaretEndRequest(_ request: UUID?) {
+            guard let request, request != lastAppliedCaretEndRequest, let textView else { return }
+            let range = NSRange(location: (textView.string as NSString).length, length: 0)
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+            lastAppliedCaretEndRequest = request
         }
 
         func startObservingBoundsChanges() {
@@ -379,6 +391,7 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var hoveredEntryId: UUID? = nil
@@ -1561,6 +1574,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
+                        caretEndRequest: editorCaretEndRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
@@ -1933,7 +1947,10 @@ struct ContentView: View {
                     print("Error reading unbound write target: \(error)")
                     return
                 }
-                text = mergedText
+                if mergedText != text {
+                    text = mergedText
+                    editorCaretEndRequest = UUID()
+                }
                 let entry = entryForResolvedTarget(target)
                 if !entries.contains(where: { $0.id == entry.id }) {
                     entries.insert(entry, at: 0)
