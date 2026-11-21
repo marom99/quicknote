@@ -2016,6 +2016,10 @@ struct ContentView: View {
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
+            if historyTrash?.isUneditedReplacement(at: fileURL) == true {
+                if text.isEmpty { return }
+                historyTrash?.invalidateReplacement()
+            }
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
             print("Successfully saved entry: \(entry.filename)")
             if updatePreview {
@@ -2428,6 +2432,12 @@ struct ContentView: View {
                         loadEntry(entry: firstEntry)
                     } else if isCapturePerSessionMode {
                         beginFreshCaptureSession(clearText: true)
+                    } else if activeSaveMode == .rolling {
+                        _ = bindToResolvedWriteTarget(appendSeparator: false)
+                        if selectedEntryId == entry.id,
+                           fileManager.fileExists(atPath: fileURL.path) {
+                            try historyTrash?.trackEmptyReplacement(at: fileURL)
+                        }
                     } else {
                         createNewEntry()
                     }

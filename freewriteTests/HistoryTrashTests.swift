@@ -3,6 +3,51 @@ import Testing
 @testable import freewrite
 
 struct HistoryTrashTests {
+    @Test func undoReplacesOnlyTrackedUneditedEmptyFile() throws {
+        try withDirectory { directory in
+            let url = directory.appendingPathComponent("rolling.md")
+            try "Original".write(to: url, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(url)
+            defer { try? trash.restore() }
+            try "".write(to: url, atomically: true, encoding: .utf8)
+            try trash.trackEmptyReplacement(at: url)
+            #expect(trash.isUneditedReplacement(at: url))
+            try trash.restore()
+            #expect(try String(contentsOf: url, encoding: .utf8) == "Original")
+        }
+    }
+
+    @Test func undoPreservesEditedReplacement() throws {
+        try withDirectory { directory in
+            let url = directory.appendingPathComponent("rolling.md")
+            try "Original".write(to: url, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(url)
+            defer { try? trash.restore() }
+            try "".write(to: url, atomically: true, encoding: .utf8)
+            try trash.trackEmptyReplacement(at: url)
+            try "User content".write(to: url, atomically: true, encoding: .utf8)
+            #expect(throws: (any Error).self) { try trash.restore() }
+            #expect(try String(contentsOf: url, encoding: .utf8) == "User content")
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    @Test func undoPreservesUntrackedEmptyOccupant() throws {
+        try withDirectory { directory in
+            let url = directory.appendingPathComponent("rolling.md")
+            try "Original".write(to: url, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(url)
+            defer { try? trash.restore() }
+            try "".write(to: url, atomically: true, encoding: .utf8)
+            #expect(throws: (any Error).self) { try trash.restore() }
+            #expect(try Data(contentsOf: url).isEmpty)
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     private func withDirectory(_ body: (URL) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
