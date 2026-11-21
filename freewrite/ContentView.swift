@@ -1926,6 +1926,14 @@ struct ContentView: View {
                         destination: destination,
                         documentsURL: documentsDirectory
                       ) {
+                let mergedText: String
+                do {
+                    mergedText = try DestinationWriteTarget.contentForUnboundEdit(text, target: target)
+                } catch {
+                    print("Error reading unbound write target: \(error)")
+                    return
+                }
+                text = mergedText
                 let entry = entryForResolvedTarget(target)
                 if !entries.contains(where: { $0.id == entry.id }) {
                     entries.insert(entry, at: 0)

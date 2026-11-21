@@ -3,6 +3,30 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test func unboundEditPreservesRestoredContent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: .existing, existingNoteFilename: "journal.md"
+        )
+        let target = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "new text", destination: destination, documentsURL: directory
+        ))
+        #expect(try DestinationWriteTarget.contentForUnboundEdit("new text", target: target) == "new text")
+        for restored in ["restored text", "restored text\n", " \n"] {
+            try restored.write(to: target.fileURL, atomically: true, encoding: .utf8)
+            let merged = try DestinationWriteTarget.contentForUnboundEdit("new text", target: target)
+            #expect(merged == restored + (restored.hasSuffix("\n") ? "" : "\n") + "new text")
+            #expect(try String(contentsOf: target.fileURL, encoding: .utf8) == restored)
+        }
+        try FileManager.default.removeItem(at: target.fileURL)
+        #expect(throws: (any Error).self) {
+            try DestinationWriteTarget.contentForUnboundEdit("new text", target: target)
+        }
+    }
+
     @Test(arguments: [DestinationSaveMode.existing, .rolling])
     func unboundEditRecreatesDeletedTarget(mode: DestinationSaveMode) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

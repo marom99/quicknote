@@ -225,6 +225,12 @@ enum DestinationWriteTarget {
 
     // MARK: - Resolve write target
 
+    static func contentForUnboundEdit(_ content: String, target: ResolvedTarget) throws -> String {
+        let existing = try String(contentsOf: target.fileURL, encoding: .utf8)
+        guard !existing.isEmpty else { return content }
+        return existing + (existing.hasSuffix("\n") ? "" : "\n") + content
+    }
+
     static func resolveForUnboundEdit(
         content: String,
         destination: SaveDestination,
