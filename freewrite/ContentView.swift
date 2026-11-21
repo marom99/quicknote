@@ -1346,10 +1346,6 @@ struct ContentView: View {
         pendingDestinationSettingsCloseAction = nil
         showingDiscardDestinationSettingsConfirmation = false
 
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showingDestinationSettings = false
-        }
-
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
         }
