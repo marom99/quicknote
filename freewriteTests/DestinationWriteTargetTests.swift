@@ -241,3 +241,19 @@ struct DestinationWriteTargetTests {
         #expect(unique == "note-2.md")
     }
 }
+
+struct EditorTextMatchesFileTests {
+    @Test func identicalTextMatches() {
+        #expect(DestinationWriteTarget.editorTextMatchesFile("Ideas\nbody", fileContent: "Ideas\nbody"))
+    }
+
+    @Test func strippedLegacyLeadingNewlinesMatch() {
+        #expect(DestinationWriteTarget.editorTextMatchesFile("Ideas", fileContent: "\n\nIdeas"))
+    }
+
+    @Test func editedTextDoesNotMatch() {
+        #expect(!DestinationWriteTarget.editorTextMatchesFile("Ideas!", fileContent: "Ideas"))
+        #expect(!DestinationWriteTarget.editorTextMatchesFile("", fileContent: "Ideas"))
+        #expect(!DestinationWriteTarget.editorTextMatchesFile("Ideas", fileContent: "Ideas\n"))
+    }
+}

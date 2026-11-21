@@ -214,6 +214,12 @@ enum DestinationWriteTarget {
         return "\n---\n\(formatter.string(from: date))\n"
     }
 
+    /// True when saving `text` would not change the file: identical, or identical once the
+    /// legacy leading newlines that `loadEntry` strips are ignored.
+    static func editorTextMatchesFile(_ text: String, fileContent: String) -> Bool {
+        fileContent == text || String(fileContent.drop(while: { $0 == "\n" })) == text
+    }
+
     static func displayDateString(from date: Date, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

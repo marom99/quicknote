@@ -1997,6 +1997,12 @@ struct ContentView: View {
             return
         }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
+
+        // Selecting or leaving a note without editing it must not touch the file (or its mtime).
+        if let diskText = try? String(contentsOf: fileURL, encoding: .utf8),
+           DestinationWriteTarget.editorTextMatchesFile(text, fileContent: diskText) {
+            return
+        }
         
         do {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
