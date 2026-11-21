@@ -1651,6 +1651,7 @@ struct ContentView: View {
                             }) {
                                 Text("New Entry")
                                     .font(.system(size: 13))
+                                    .fixedSize()
                             }
                             .buttonStyle(.plain)
                             .foregroundColor(isHoveringNewEntry ? textHoverColor : textColor)
@@ -2095,7 +2096,8 @@ struct ContentView: View {
             .foregroundColor(isHoveringDestinationChip ? textHoverColor : textColor)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(-1)
         .onHover { hovering in
             isHoveringDestinationChip = hovering
             isHoveringBottomNav = hovering
