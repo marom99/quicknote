@@ -69,6 +69,7 @@ freewrite/
 ├── freewrite/
 │   ├── freewriteApp.swift        # App entry point
 │   ├── ContentView.swift         # Main view (1400+ lines)
+│   ├── QuickCapture.swift        # Carbon hotkey + menu-bar capture routing
 │   ├── DestinationStore.swift    # Named destinations + save modes
 │   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
 │   ├── VideoRecordingView.swift  # Video recording interface
@@ -306,6 +307,13 @@ struct VideoPlayerView: View {
 4. Main view checks `if let videoURL = currentVideoURL`
 5. Shows `VideoPlayerView(videoURL:)` instead of TextEditor
 6. Video auto-plays muted with standard AVKit controls
+
+## Quick capture (global hotkey + menu bar)
+
+- ⌃⌥⌘N uses Carbon hotkey registration (no Accessibility permission); the menu-bar pencil also offers Quick Capture, Show Window, and Quit.
+- Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
+- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor. The current ContentView has no recording overlay presentation path; if recording is restored, skip capture while that overlay is visible.
+- `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
 
 ## Entry Loading Logic
 

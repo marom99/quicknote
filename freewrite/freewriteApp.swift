@@ -239,7 +239,7 @@ struct freewriteApp: App {
     }
      
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
                 .preferredColorScheme(colorSchemeString == "dark" ? .dark : .light)
         }
@@ -247,12 +247,30 @@ struct freewriteApp: App {
         // Default is a comfortable note size; min allows Age-like compact windows.
         .defaultSize(width: 360, height: 540)
         .windowResizability(.contentMinSize)
+
+        MenuBarExtra {
+            Button("Quick Capture  \(CaptureHotKey.standard.displayString)") {
+                QuickCaptureCenter.shared.trigger()
+            }
+            Button("Show Window") {
+                QuickCaptureCenter.shared.showWindow()
+            }
+            Divider()
+            Button("Quit") { NSApp.terminate(nil) }
+        } label: {
+            QuickCaptureMenuLabel()
+        }
     }
 }
 
 // Add AppDelegate to handle window configuration
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var globalHotKey: GlobalHotKey?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        globalHotKey = GlobalHotKey {
+            MainActor.assumeIsolated { QuickCaptureCenter.shared.trigger() }
+        }
         WindowChrome.startObserving()
 
         if let window = NSApplication.shared.windows.first {
