@@ -3,6 +3,33 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func directoryAtTargetPathIsRejected(mode: DestinationSaveMode) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: mode, existingNoteFilename: "journal.md"
+        )
+        let now = Date()
+        let target = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now, createIfMissing: false
+        ))
+        try FileManager.default.createDirectory(at: target.fileURL, withIntermediateDirectories: false)
+        let child = target.fileURL.appendingPathComponent("keep.txt")
+        try "keep".write(to: child, atomically: true, encoding: .utf8)
+        for createIfMissing in [true, false] {
+            #expect(DestinationWriteTarget.resolve(
+                for: destination, documentsURL: directory, now: now, createIfMissing: createIfMissing
+            ) == nil)
+        }
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: destination, documentsURL: directory, now: now
+        ) == nil)
+        #expect(try String(contentsOf: child, encoding: .utf8) == "keep")
+    }
+
     @Test func unboundEditPreservesRestoredContent() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

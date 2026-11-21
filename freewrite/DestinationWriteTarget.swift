@@ -300,7 +300,9 @@ enum DestinationWriteTarget {
         let fileURL = documentsURL.appendingPathComponent(filename)
         let pathKey = fileURL.standardizedFileURL.path
         let entryId = stableUUID(fromPath: pathKey)
-        let exists = fileManager.fileExists(atPath: fileURL.path)
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+        guard !isDirectory.boolValue else { return nil }
         var didCreate = false
 
         if !exists && createIfMissing {
