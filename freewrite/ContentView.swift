@@ -404,6 +404,12 @@ struct ContentView: View {
     @State private var showingDiscardDestinationSettingsConfirmation = false
     @State private var inProgressCaptureFilename: String? = nil
     @State private var captureStartedAt: Date? = nil
+    @State private var historyTrash: HistoryTrash? = nil
+    @State private var trashedEntry: HumanEntry? = nil
+    @State private var trashedEntryIndex = 0
+    @State private var trashDestinationID: UUID? = nil
+    @State private var trashNoticeID = UUID()
+    @State private var trashError: String? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -1338,6 +1344,8 @@ struct ContentView: View {
         }
 
         destinationStore.activateDestination(id: id)
+        historyTrash = nil
+        trashedEntry = nil
         // Defer journal reload so ForEach(entries) isn't mid-update when History is open.
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
@@ -1886,6 +1894,27 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .animation(.easeInOut(duration: 0.2), value: showingDestinationSettings)
         .preferredColorScheme(colorScheme)
+        .overlay(alignment: .top) {
+            if historyTrash != nil {
+                HStack(spacing: 12) {
+                    Text("Moved to Trash")
+                    Button("Undo", action: undoHistoryTrash)
+                        .buttonStyle(.bordered)
+                }
+                .font(.system(size: 13))
+                .padding(12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .padding(.top, 12)
+            }
+        }
+        .alert("Couldn't update Trash", isPresented: Binding(
+            get: { trashError != nil },
+            set: { if !$0 { trashError = nil } }
+        )) {
+            Button("OK") { trashError = nil }
+        } message: {
+            Text(trashError ?? "")
+        }
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
@@ -2351,23 +2380,46 @@ struct ContentView: View {
     }
 
     private func deleteEntry(entry: HumanEntry) {
-        // Delete the file from the filesystem
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
+        var trash = HistoryTrash()
         do {
-            try fileManager.removeItem(at: fileURL)
-            print("Successfully deleted file: \(entry.filename)")
-
-            // If this is a video entry, also delete the video file
+            try trash.moveToTrash(fileURL)
             if let videoFilename = resolvedVideoFilename(for: entry) {
-                deleteVideoAssets(for: videoFilename)
-                print("Successfully deleted video assets: \(videoFilename)")
+                var assets: [URL] = []
+                if let directory = getVideoEntryDirectory(for: videoFilename) {
+                    assets.append(directory)
+                }
+                if let directory = getVideosDirectory() {
+                    assets.append(directory.appendingPathComponent(videoFilename))
+                }
+                assets.append(documentsDirectory.appendingPathComponent(videoFilename))
+                for url in assets where fileManager.fileExists(atPath: url.path) {
+                    try trash.moveToTrash(url)
+                }
+                thumbnailMemoryCache.removeObject(forKey: videoFilename as NSString)
+            }
+
+            historyTrash = trash
+            trashedEntry = entry
+            trashedEntryIndex = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
+            trashDestinationID = destinationStore.activeDestinationId
+            let noticeID = UUID()
+            trashNoticeID = noticeID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                guard trashNoticeID == noticeID else { return }
+                historyTrash = nil
+                trashedEntry = nil
             }
 
             // Remove the entry from the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries.remove(at: index)
+                if inProgressCaptureFilename == entry.filename {
+                    inProgressCaptureFilename = nil
+                    captureStartedAt = nil
+                }
 
                 // If the deleted entry was selected, select the first entry or create a new one
                 if selectedEntryId == entry.id {
@@ -2382,7 +2434,32 @@ struct ContentView: View {
                 }
             }
         } catch {
-            print("Error deleting file: \(error)")
+            let deletionError = error
+            do {
+                try trash.restore()
+            } catch {
+                historyTrash = trash
+                trashedEntry = entry
+                trashDestinationID = destinationStore.activeDestinationId
+            }
+            trashError = deletionError.localizedDescription
+        }
+    }
+
+    private func undoHistoryTrash() {
+        guard var trash = historyTrash,
+              trashDestinationID == destinationStore.activeDestinationId else { return }
+        do {
+            try trash.restore()
+            historyTrash = nil
+            if let entry = trashedEntry,
+               !entries.contains(where: { $0.id == entry.id }) {
+                entries.insert(entry, at: min(trashedEntryIndex, entries.count))
+            }
+            trashedEntry = nil
+        } catch {
+            historyTrash = trash
+            trashError = error.localizedDescription
         }
     }
 }
