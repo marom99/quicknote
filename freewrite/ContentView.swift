@@ -920,8 +920,10 @@ struct ContentView: View {
             return false
         }
 
-        guard let entry = entries.first(where: { $0.filename == draftFilename }),
-              saveEntry(entry: entry, updatePreview: true) else { return false }
+        var didSave = false
+        if let entry = entries.first(where: { $0.filename == draftFilename }) {
+            didSave = saveEntry(entry: entry, updatePreview: true)
+        }
 
         let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
         if format == .title {
@@ -940,8 +942,11 @@ struct ContentView: View {
             )
 
             if finalFilename != draftFilename {
-                guard moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) else { return false }
-                updateEntryFilename(from: draftFilename, to: finalFilename)
+                if moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) {
+                    updateEntryFilename(from: draftFilename, to: finalFilename)
+                } else {
+                    didSave = false
+                }
             }
         }
 
@@ -952,7 +957,7 @@ struct ContentView: View {
         text = ""
         isLoadingEntry = false
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-        return true
+        return didSave
     }
 
     private func entryDisplayDate(from date: Date) -> String {
