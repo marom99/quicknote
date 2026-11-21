@@ -108,7 +108,7 @@ struct HumanEntry: Identifiable {
 - The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
   - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
-  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n`.
+  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
 - Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.

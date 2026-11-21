@@ -75,9 +75,14 @@ struct EditorScrollRequest: Equatable {
     let fraction: CGFloat
 }
 
+struct EditorCaretRequest: Equatable {
+    let id = UUID()
+}
+
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
+    @Binding var caretToEndRequest: EditorCaretRequest?
 
     let editorID: UUID?
     let selectedFont: String
@@ -176,6 +181,11 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastAppliedScrollRequest = request
         }
 
+        if let request = caretToEndRequest, request != context.coordinator.lastAppliedCaretRequest {
+            context.coordinator.placeCaretAtEnd()
+            context.coordinator.lastAppliedCaretRequest = request
+        }
+
         context.coordinator.publishScrollMetrics()
     }
 
@@ -192,6 +202,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastAppliedCaretRequest: EditorCaretRequest?
         var lastConfiguredEditorID: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
@@ -264,6 +275,16 @@ struct FreewriteTextEditor: NSViewRepresentable {
             guard !isUpdatingText, let textView else { return }
             text = textView.string
             publishScrollMetrics()
+        }
+
+        func placeCaretAtEnd() {
+            guard let textView else { return }
+            let end = (textView.string as NSString).length
+            textView.setSelectedRange(NSRange(location: end, length: 0))
+            textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+            if let window = textView.window, window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+            }
         }
 
         func scrollTo(fraction: CGFloat) {
@@ -379,6 +400,7 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorCaretToEndRequest: EditorCaretRequest?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var hoveredEntryId: UUID? = nil
@@ -1093,6 +1115,7 @@ struct ContentView: View {
             selectedEntryId = entry.id
             isLoadingEntry = false
             saveEntry(entry: entry)
+            editorCaretToEndRequest = EditorCaretRequest()
         } else {
             selectedEntryId = entry.id
             isLoadingEntry = false
@@ -1561,6 +1584,7 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
+                        caretToEndRequest: $editorCaretToEndRequest,
                         editorID: selectedEntryId,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
