@@ -2088,8 +2088,10 @@ struct ContentView: View {
         if activeSaveMode == .rolling || activeSaveMode == .existing {
             if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
-               currentEntry.entryType == .text {
-                saveEntry(entry: currentEntry, updatePreview: false)
+               currentEntry.entryType == .text,
+               !saveEntry(entry: currentEntry, updatePreview: false) {
+                // Keep unsaved text in the editor instead of reloading the file from disk.
+                return
             }
             didSave = bindToResolvedWriteTarget(appendSeparator: true)
         } else {
