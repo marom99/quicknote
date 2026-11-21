@@ -3,39 +3,23 @@ import Testing
 @testable import freewrite
 
 struct EditorCommandsTests {
-    @Test func focusedActionsRouteToTheirMatchingHandler() {
-        var calls: [String] = []
-        var values = FocusedValues()
-        values.editorCommandActions = EditorCommandActions(
-            newEntry: { calls.append("newEntry") },
-            openHistory: { calls.append("history") },
-            openDestinationSettings: { calls.append("settings") }
+    @Test(arguments: [
+        (EditorCommand.newEntry, KeyboardShortcut("n", modifiers: .command)),
+        (.openHistory, KeyboardShortcut("h", modifiers: [.command, .shift])),
+        (.openDestinationSettings, KeyboardShortcut(",", modifiers: .command))
+    ])
+    func commandUsesExpectedShortcutAndHandler(command: EditorCommand, shortcut: KeyboardShortcut) {
+        var calls: [EditorCommand] = []
+        let actions = EditorCommandActions(
+            newEntry: { calls.append(.newEntry) },
+            openHistory: { calls.append(.openHistory) },
+            openDestinationSettings: { calls.append(.openDestinationSettings) }
         )
 
-        values.editorCommandActions?.newEntry()
-        #expect(calls == ["newEntry"])
-        values.editorCommandActions?.openHistory()
-        #expect(calls == ["newEntry", "history"])
-        values.editorCommandActions?.openDestinationSettings()
-        #expect(calls == ["newEntry", "history", "settings"])
-    }
-
-    @Test func missingFocusedActionsAreSafeAndCanBeCleared() {
-        var values = FocusedValues()
-        #expect(values.editorCommandActions == nil)
-
-        var callCount = 0
-        values.editorCommandActions = EditorCommandActions(
-            newEntry: { callCount += 1 },
-            openHistory: { callCount += 1 },
-            openDestinationSettings: { callCount += 1 }
-        )
-        values.editorCommandActions = nil
-
-        values.editorCommandActions?.newEntry()
-        values.editorCommandActions?.openHistory()
-        values.editorCommandActions?.openDestinationSettings()
-        #expect(values.editorCommandActions == nil)
-        #expect(callCount == 0)
+        #expect(command.shortcut == shortcut)
+        command.perform(with: actions)
+        #expect(calls == [command])
+        command.perform(with: nil)
+        #expect(calls == [command])
     }
 }

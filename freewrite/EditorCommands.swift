@@ -17,32 +17,51 @@ extension FocusedValues {
     }
 }
 
+enum EditorCommand {
+    case newEntry
+    case openHistory
+    case openDestinationSettings
+
+    var shortcut: KeyboardShortcut {
+        switch self {
+        case .newEntry: KeyboardShortcut("n", modifiers: .command)
+        case .openHistory: KeyboardShortcut("h", modifiers: [.command, .shift])
+        case .openDestinationSettings: KeyboardShortcut(",", modifiers: .command)
+        }
+    }
+
+    func perform(with actions: EditorCommandActions?) {
+        guard let actions else { return }
+        switch self {
+        case .newEntry: actions.newEntry()
+        case .openHistory: actions.openHistory()
+        case .openDestinationSettings: actions.openDestinationSettings()
+        }
+    }
+}
+
 struct EditorCommands: Commands {
     @FocusedValue(\.editorCommandActions) private var actions
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Entry") {
-                actions?.newEntry()
-            }
-            .keyboardShortcut("n", modifiers: .command)
-            .disabled(actions == nil)
+            commandButton("New Entry", .newEntry)
         }
 
         CommandGroup(after: .sidebar) {
-            Button("History") {
-                actions?.openHistory()
-            }
-            .keyboardShortcut("h", modifiers: [.command, .shift])
-            .disabled(actions == nil)
+            commandButton("History", .openHistory)
         }
 
         CommandGroup(replacing: .appSettings) {
-            Button("Destination Settings…") {
-                actions?.openDestinationSettings()
-            }
-            .keyboardShortcut(",", modifiers: .command)
-            .disabled(actions == nil)
+            commandButton("Destination Settings…", .openDestinationSettings)
         }
+    }
+
+    private func commandButton(_ title: LocalizedStringKey, _ command: EditorCommand) -> some View {
+        Button(title) {
+            command.perform(with: actions)
+        }
+        .keyboardShortcut(command.shortcut)
+        .disabled(actions == nil)
     }
 }
