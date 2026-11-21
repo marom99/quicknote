@@ -1886,6 +1886,19 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .animation(.easeInOut(duration: 0.2), value: showingDestinationSettings)
         .preferredColorScheme(colorScheme)
+        .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
+            newEntry: createNewEntry,
+            openHistory: {
+                if !showingSidebar {
+                    openHistorySidebar()
+                }
+            },
+            openDestinationSettings: {
+                if !showingDestinationSettings {
+                    openDestinationSettings()
+                }
+            }
+        ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
