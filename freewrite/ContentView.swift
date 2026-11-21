@@ -184,6 +184,13 @@ struct FreewriteTextEditor: NSViewRepresentable {
         if let request = caretToEndRequest, request != context.coordinator.lastAppliedCaretRequest {
             context.coordinator.placeCaretAtEnd()
             context.coordinator.lastAppliedCaretRequest = request
+            // One-shot: clear it so a recreated editor does not replay it.
+            let binding = $caretToEndRequest
+            DispatchQueue.main.async {
+                if binding.wrappedValue == request {
+                    binding.wrappedValue = nil
+                }
+            }
         }
 
         context.coordinator.publishScrollMetrics()
