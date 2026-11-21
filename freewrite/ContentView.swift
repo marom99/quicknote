@@ -516,7 +516,7 @@ struct ContentView: View {
             }
         }
 
-        // Backward compatibility: oldest builds stored videos in root Freewrite folder
+        // Backward compatibility: oldest builds stored videos in the destination root
         if let documentsDirectory = getDocumentsDirectory() {
             let rootVideosURL = documentsDirectory.appendingPathComponent(filename)
             if fileManager.fileExists(atPath: rootVideosURL.path) {
@@ -1378,7 +1378,7 @@ struct ContentView: View {
     }
 
     private var activeDestinationDisplayName: String {
-        destinationStore.activeDestination?.displayName ?? "Freewrite"
+        destinationStore.activeDestination?.displayName ?? SaveDestination.defaultDisplayName
     }
 
     // Add function to load existing entries

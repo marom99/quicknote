@@ -1,7 +1,7 @@
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 
-# Freewrite is a native macOS SwiftUI app (Xcode/Swift, no package manager).
-# Entries live in ~/Documents/Freewrite/ and preferences use
+# Quick Note is a native macOS SwiftUI app (Xcode/Swift, no package manager).
+# Entries live in ~/Documents/Quick Note/ and preferences use
 # app.humansongs.freewrite UserDefaults, so only one launched app at a time.
 
 [scripts]
