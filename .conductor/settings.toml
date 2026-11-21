@@ -19,7 +19,7 @@ run_mode = "nonconcurrent"
 archive = """
 set -euo pipefail
 DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
-APP_BIN="$DERIVED_DATA/Build/Products/Debug/freewrite.app/Contents/MacOS/freewrite"
+APP_BIN="$DERIVED_DATA/Build/Products/Debug/Quick Note.app/Contents/MacOS/Quick Note"
 if [ -x "$APP_BIN" ]; then
   pkill -f "$APP_BIN" 2>/dev/null || true
 fi
@@ -31,7 +31,7 @@ command = """
 set -euo pipefail
 DERIVED_DATA="${TMPDIR%/}/conductor-freewrite-${CONDUCTOR_WORKSPACE_NAME:-workspace}"
 xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" build
-exec "$DERIVED_DATA/Build/Products/Debug/freewrite.app/Contents/MacOS/freewrite"
+exec "$DERIVED_DATA/Build/Products/Debug/Quick Note.app/Contents/MacOS/Quick Note"
 """
 default = true
 icon = "play"

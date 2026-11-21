@@ -866,6 +866,7 @@ let fileURL = documentsDirectory.appendingPathComponent(filename)
 ## Build Configuration
 
 **Scheme**: freewrite
+**Product**: `Quick Note.app` (`PRODUCT_NAME = "Quick Note"`, which sets the menu bar and About name; `PRODUCT_MODULE_NAME = freewrite` keeps `@testable import freewrite`; bundle id stays `app.humansongs.freewrite` so the sandbox container and preferences carry over)
 **Configuration**: Debug or Release
 **Build Command**:
 ```bash
