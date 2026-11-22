@@ -1,4 +1,4 @@
-# Freewrite - Technical Documentation for AI Agents
+# Quick Note - Technical Documentation for AI Agents
 
 > **⚠️ IMPORTANT FOR AI AGENTS**: This file (`AGENTS.md`) and `CLAUDE.md` are clones and must be kept in sync.
 >
@@ -10,9 +10,9 @@
 
 ## Product Vision & User Experience
 
-### What is Freewrite?
+### What is Quick Note?
 
-Freewrite is a **distraction-free writing environment** for macOS designed around the concept of stream-of-consciousness writing and video journaling. The core philosophy is to remove barriers between thought and writing by creating a minimalist, opinionated interface that prioritizes the act of writing over formatting, organization, or editing.
+Quick Note is a **distraction-free writing environment** for macOS designed around the concept of stream-of-consciousness writing and video journaling. The core philosophy is to remove barriers between thought and writing by creating a minimalist, opinionated interface that prioritizes the act of writing over formatting, organization, or editing.
 
 ### User Experience Philosophy
 
@@ -50,7 +50,7 @@ Freewrite is a **distraction-free writing environment** for macOS designed aroun
 
 ## Overview
 
-Freewrite is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Freewrite/`, and writers can add additional named destinations pointing at other folders.
+Quick Note is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Quick Note/`, and writers can add additional named destinations pointing at other folders.
 
 ## Architecture
 
@@ -102,12 +102,14 @@ struct HumanEntry: Identifiable {
 
 ### File Storage
 
-**Default location**: `~/Documents/Freewrite/` (always available as the first named destination)
+**Default location**: `~/Documents/Quick Note/` (always available as the first named destination)
+
+**Legacy Freewrite migration**: on first resolve, an existing `~/Documents/Freewrite/` is moved to `~/Documents/Quick Note/` when no `Quick Note` folder exists yet (if the move fails, the legacy folder stays in use). A persisted default destination still named `Freewrite` is renamed to `Quick Note`; user-chosen names are kept.
 
 **Named save destinations**:
 - Writers pick additional journal folders via the bottom-left destination menu (`Add destination…`).
 - Each destination has a display name (defaults to the folder name) and an optional security-scoped bookmark for user-picked paths.
-- The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
+- The default Quick Note folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
   - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
   - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Note; New Note appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
@@ -144,7 +146,7 @@ struct HumanEntry: Identifiable {
   - `[UUID]-[YYYY-MM-DD-HH-mm-ss].mov`
   - `thumbnail.jpg`
   - `transcript.md` (optional; speech transcript for that recording)
-- Example directory: `~/Documents/Freewrite/Videos/[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04]/`
+- Example directory: `~/Documents/Quick Note/Videos/[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04]/`
 
 ## Key Components
 
@@ -296,10 +298,10 @@ struct VideoPlayerView: View {
    - Speech transcript is finalized (spacing + sentence endings/capitalization)
    - `onRecordingComplete` closure called with temp URL + finalized transcript
 10. `saveVideoEntry(from:transcript:)` called
-   - Creates per-entry video directory in `~/Documents/Freewrite/Videos/[UUID]-[date]/`
-   - Video copied from temp to `~/Documents/Freewrite/Videos/[UUID]-[date]/[UUID]-[date].mov`
-   - Thumbnail generated once and saved to `~/Documents/Freewrite/Videos/[UUID]-[date]/thumbnail.jpg`
-   - Transcript saved to `~/Documents/Freewrite/Videos/[UUID]-[date]/transcript.md` when available
+   - Creates per-entry video directory in `~/Documents/Quick Note/Videos/[UUID]-[date]/`
+   - Video copied from temp to `~/Documents/Quick Note/Videos/[UUID]-[date]/[UUID]-[date].mov`
+   - Thumbnail generated once and saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/thumbnail.jpg`
+   - Transcript saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/transcript.md` when available
    - Metadata file created: `[UUID]-[date].md` with "Video Entry"
    - Entry added to `entries` array (on main thread), selected immediately, and loaded into the main view
    - Playback starts automatically with audio enabled
@@ -378,9 +380,9 @@ Required entitlements in `freewrite.entitlements`:
 Privacy usage descriptions (in Xcode project build settings):
 
 ```
-INFOPLIST_KEY_NSCameraUsageDescription = "Freewrite needs camera access to record video entries."
-INFOPLIST_KEY_NSMicrophoneUsageDescription = "Freewrite needs microphone access to record audio with your video entries."
-INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Freewrite uses speech recognition to transcribe your video entries."
+INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries."
+INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries."
+INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Quick Note uses speech recognition to transcribe your video entries."
 ```
 
 ## Technical Nuances & Implementation Details
@@ -881,13 +883,14 @@ if session.isRunning {
 Always use absolute paths:
 ```swift
 let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("Freewrite")
+    .appendingPathComponent("Quick Note")
 let fileURL = documentsDirectory.appendingPathComponent(filename)
 ```
 
 ## Build Configuration
 
 **Scheme**: freewrite
+**Product**: `Quick Note.app` (`PRODUCT_NAME = "Quick Note"`, which sets the menu bar and About name; `PRODUCT_MODULE_NAME = freewrite` keeps `@testable import freewrite`; bundle id stays `app.humansongs.freewrite` so the sandbox container and preferences carry over)
 **Configuration**: Debug or Release
 **Build Command**:
 ```bash
@@ -977,7 +980,7 @@ Enable console output in Xcode to see:
 - Entry creation: "Successfully created video entry"
 - Errors: "Error saving video entry: ..."
 
-Check `~/Documents/Freewrite/` in Finder to verify files are being created.
+Check `~/Documents/Quick Note/` in Finder to verify files are being created.
 
 ## Code Organization
 
@@ -1008,7 +1011,7 @@ The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeSc
 
 ## Summary
 
-Freewrite is a straightforward macOS writing app with video recording capabilities. All data is local, no backend required. The main complexity is in:
+Quick Note is a straightforward macOS writing app with video recording capabilities. All data is local, no backend required. The main complexity is in:
 
 1. Proper file management and UUID-based naming
 2. Thread-safe array mutations for entries

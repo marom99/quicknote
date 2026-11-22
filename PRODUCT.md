@@ -12,26 +12,26 @@ Distraction-free writers and journalers who want to capture thoughts exactly whe
 
 ## Product Purpose
 
-Freewrite is a distraction-free macOS writing environment built around stream-of-consciousness writing. It removes the friction between thought and capture: no save button, no "New Document" dialog, no formatting decisions — you open it and type. Everything is auto-saved locally as plain markdown files the user owns. Success looks like a user entering flow immediately and capturing more, more honestly, than they would in a heavier tool.
+Quick Note is a distraction-free macOS writing environment built around stream-of-consciousness writing. It removes the friction between thought and capture: no save button, no "New Document" dialog, no formatting decisions — you open it and type. Everything is auto-saved locally as plain markdown files the user owns. Success looks like a user entering flow immediately and capturing more, more honestly, than they would in a heavier tool.
 
 ## Positioning
 
-The quietest local-first freewrite surface on macOS: open the app and you are already writing today's entry, in plain files you own, with no ceremony. Neighboring notes apps ask you to manage documents, folders, or formatting first; Freewrite's mechanism is auto-everything and a near-invisible interface so the writing stays the only thing on screen.
+The quietest local-first quick-capture surface on macOS: open the app and you are already writing today's entry, in plain files you own, with no ceremony. Neighboring notes apps ask you to manage documents, folders, or formatting first; Quick Note's mechanism is auto-everything and a near-invisible interface so the writing stays the only thing on screen.
 
 ## Operating Context
 
 - Native macOS desktop app (SwiftUI / AppKit window chrome), typically used in a single focused window during a quiet writing session.
-- Entries live under `~/Documents/Freewrite/` as plain `.md` files; video assets (when present) live under `~/Documents/Freewrite/Videos/`.
+- Entries live under `~/Documents/Quick Note/` as plain `.md` files; video assets (when present) live under `~/Documents/Quick Note/Videos/`.
 - Core loop: open → write into today's empty entry → auto-save on every change → optionally open History to revisit or delete → optionally play an existing video entry.
 - Theme (light/dark) is user-switchable and persisted; writing font is currently fixed (Lato at 14px) for the session chrome/product surface as shipped.
-- Site / distribution: [freewrite.io](https://www.freewrite.io/); development via Xcode (`freewrite.xcodeproj`).
+- Distribution: development via Xcode (`freewrite.xcodeproj`); forked from [freewrite](https://github.com/farzaa/freewrite).
 
 ## Capabilities and Constraints
 
 **Present (confirmed):**
 - Text entries with continuous auto-save to local markdown.
 - Automatic daily empty entry / welcome entry on first launch.
-- History sidebar (200px) with entry preview, date, delete, and Finder reveal of the Freewrite folder.
+- History sidebar (200px) with entry preview, date, delete, and Finder reveal of the Quick Note folder.
 - Native window title reflecting the current entry; solid title bar matched to paper/night with a muted bottom border.
 - Bottom nav: New Note, theme toggle, History. New Note briefly shows “Saved to <destination name>” only after a successful nonempty note finalization or session-separator write.
 - Light and dark appearance, persisted in UserDefaults.
@@ -49,7 +49,7 @@ The quietest local-first freewrite surface on macOS: open the app and you are al
 
 ## Brand Commitments
 
-- **Name:** Freewrite.
+- **Name:** Quick Note.
 - **Voice:** A friend, not a tool or a therapist — warm, direct, slightly casual, never clinical, never corporate.
 - **Personality:** Fast, light, frictionless. Calm, minimal, human. The interface is quiet and nearly invisible so the writing is the only thing on screen.
 - **Anti-references (binding):**
@@ -59,7 +59,7 @@ The quietest local-first freewrite surface on macOS: open the app and you are al
 
 ## Evidence on Hand
 
-- Marketing / download site: [https://www.freewrite.io/](https://www.freewrite.io/)
+- Repository: [github.com/marom99/quicknote](https://github.com/marom99/quicknote) (upstream site [freewrite.io](https://www.freewrite.io/) is not ours)
 - Open-source repository with README demo GIF (`https://i.imgur.com/2ucbtff.gif`)
 - Bundled typeface: Lato (`freewrite/fonts/`)
 - Design system record: `DESIGN.md` and `.impeccable/design.json` ("The Quiet Page")
