@@ -22,6 +22,7 @@ struct HumanEntry: Identifiable {
     var previewText: String
     var entryType: EntryType
     var videoFilename: String?
+    var timestamp: Date? = nil
 
     static func createNew() -> HumanEntry {
         let id = UUID()
@@ -40,7 +41,8 @@ struct HumanEntry: Identifiable {
             filename: "[\(id)]-[\(dateString)].md",
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
     }
 }
@@ -75,11 +77,106 @@ struct EditorScrollRequest: Equatable {
     let fraction: CGFloat
 }
 
+final class FreewriteEditorTextView: NSTextView {
+    var allowsAutomaticFocus = true {
+        didSet {
+            if allowsAutomaticFocus && !oldValue {
+                requestAutomaticFocus()
+            }
+        }
+    }
+    private var keyWindowObserver: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+        keyWindowObserver = nil
+        guard let window else { return }
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.focusIfAvailable()
+        }
+        requestAutomaticFocus()
+    }
+
+    func requestAutomaticFocus() {
+        DispatchQueue.main.async { [weak self] in
+            self?.focusIfAvailable()
+        }
+    }
+
+    func focusIfAvailable() {
+        guard allowsAutomaticFocus, let window, window.isKeyWindow,
+              !isHiddenOrHasHiddenAncestor, window.attachedSheet == nil else { return }
+        let responder = window.firstResponder
+        if let textView = responder as? NSTextView, textView.window === window,
+           !textView.isHiddenOrHasHiddenAncestor {
+            if !textView.isFieldEditor { return }
+            if let owner = textView.delegate as? NSView,
+               owner.window === window, !owner.isHiddenOrHasHiddenAncestor { return }
+            if hasLiveFieldEditorOwner(textView, in: window.contentView) { return }
+        }
+        if let textField = responder as? NSTextField, textField.window === window,
+           !textField.isHiddenOrHasHiddenAncestor { return }
+        window.makeFirstResponder(self)
+    }
+
+    private func hasLiveFieldEditorOwner(_ editor: NSTextView, in view: NSView?) -> Bool {
+        guard let view, !view.isHiddenOrHasHiddenAncestor else { return false }
+        if let field = view as? NSTextField, field.currentEditor() === editor { return true }
+        return view.subviews.contains { hasLiveFieldEditorOwner(editor, in: $0) }
+    }
+
+    deinit {
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+    }
+}
+
+struct RailRemovalObserver: NSViewRepresentable {
+    let onRemoval: () -> Void
+
+    func makeNSView(context: Context) -> RemovalView {
+        let view = RemovalView()
+        view.onRemoval = onRemoval
+        return view
+    }
+
+    func updateNSView(_ nsView: RemovalView, context: Context) {
+        nsView.onRemoval = onRemoval
+    }
+
+    final class RemovalView: NSView {
+        var onRemoval: (() -> Void)?
+        private var wasInWindow = false
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil {
+                wasInWindow = true
+            } else if wasInWindow {
+                wasInWindow = false
+                let onRemoval = onRemoval
+                DispatchQueue.main.async { onRemoval?() }
+            }
+        }
+    }
+}
+
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
+    var quickCaptureFocusRequest: UUID?
 
     let editorID: UUID?
+    let allowsAutomaticFocus: Bool
+    let focusRequest: UUID
     @Binding var caretEndRequest: UUID?
     let selectedFont: String
     let fontSize: CGFloat
@@ -109,7 +206,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
         )
         scrollView.contentView.postsBoundsChangedNotifications = true
 
-        let textView = NSTextView(frame: .zero)
+        let textView = FreewriteEditorTextView(frame: .zero)
+        textView.allowsAutomaticFocus = allowsAutomaticFocus
+        textView.setAccessibilityIdentifier("mainEditor")
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isEditable = true
@@ -156,6 +255,11 @@ struct FreewriteTextEditor: NSViewRepresentable {
         )
 
         if let textView = context.coordinator.textView {
+            (textView as? FreewriteEditorTextView)?.allowsAutomaticFocus = allowsAutomaticFocus
+            if context.coordinator.lastFocusRequest != focusRequest {
+                context.coordinator.lastFocusRequest = focusRequest
+                (textView as? FreewriteEditorTextView)?.requestAutomaticFocus()
+            }
             textView.textContainer?.lineFragmentPadding = editorNativeTextPadding
             textView.textContainerInset = NSSize(
                 width: max(editorInset - editorNativeTextPadding, 0),
@@ -186,6 +290,15 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastAppliedScrollRequest = request
         }
 
+        if let quickCaptureFocusRequest,
+           quickCaptureFocusRequest != context.coordinator.lastQuickCaptureFocusRequest {
+            context.coordinator.lastQuickCaptureFocusRequest = quickCaptureFocusRequest
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let textView = scrollView?.documentView as? NSTextView else { return }
+                QuickCaptureInputGate.resume(textView)
+            }
+        }
+
         context.coordinator.publishScrollMetrics()
     }
 
@@ -202,7 +315,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastQuickCaptureFocusRequest: UUID?
         var lastConfiguredEditorID: UUID?
+        var lastFocusRequest: UUID?
         var lastAppliedCaretEndRequest: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
@@ -259,6 +374,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
             let range = NSRange(location: (textView.string as NSString).length, length: 0)
             textView.setSelectedRange(range)
             textView.scrollRangeToVisible(range)
+            if let window = textView.window, window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+            }
             lastAppliedCaretEndRequest = request
             return true
         }
@@ -402,6 +520,8 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorFocusRequest = UUID()
+    @State private var quickCaptureFocusRequest: UUID?
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
@@ -549,7 +669,7 @@ struct ContentView: View {
             }
         }
 
-        // Backward compatibility: oldest builds stored videos in root Freewrite folder
+        // Backward compatibility: oldest builds stored videos in the destination root
         if let documentsDirectory = getDocumentsDirectory() {
             let rootVideosURL = documentsDirectory.appendingPathComponent(filename)
             if fileManager.fileExists(atPath: rootVideosURL.path) {
@@ -868,7 +988,8 @@ struct ContentView: View {
             filename: destinationFilename,
             previewText: existing.previewText,
             entryType: existing.entryType,
-            videoFilename: existing.videoFilename
+            videoFilename: existing.videoFilename,
+            timestamp: existing.timestamp
         )
         if selectedEntryId == existing.id {
             selectedEntryId = newId
@@ -912,7 +1033,8 @@ struct ContentView: View {
             filename: filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
         entries.insert(entry, at: 0)
         selectedEntryId = entry.id
@@ -1050,19 +1172,17 @@ struct ContentView: View {
 
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
+            let title = HistoryRowFormatting.title(from: content)
 
             return (
                 entry: HumanEntry(
                     id: uuid,
                     date: entryDisplayDate(from: fileDate),
                     filename: filename,
-                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : truncated,
+                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
                     entryType: hasVideo ? .video : .text,
-                    videoFilename: hasVideo ? videoFilename : nil
+                    videoFilename: hasVideo ? videoFilename : nil,
+                    timestamp: fileDate
                 ),
                 date: fileDate,
                 content: content
@@ -1084,7 +1204,8 @@ struct ContentView: View {
             filename: target.filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: target.fileExists ? modificationDate(for: target.fileURL) : Date()
         )
     }
 
@@ -1152,6 +1273,7 @@ struct ContentView: View {
             selectedEntryId = entry.id
             isLoadingEntry = false
             let didSave = saveEntry(entry: entry)
+            editorCaretEndRequest = UUID()
             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
             return didSave
         } else {
@@ -1442,7 +1564,7 @@ struct ContentView: View {
     }
 
     private var activeDestinationDisplayName: String {
-        destinationStore.activeDestination?.displayName ?? "Freewrite"
+        destinationStore.activeDestination?.displayName ?? SaveDestination.defaultDisplayName
     }
 
     // Add function to load existing entries
@@ -1639,7 +1761,10 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
+                        quickCaptureFocusRequest: quickCaptureFocusRequest,
                         editorID: selectedEntryId,
+                        allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
+                        focusRequest: editorFocusRequest,
                         caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
@@ -1668,7 +1793,7 @@ struct ContentView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .id("\(selectedFont)-\(fontSize)-\(colorScheme)")
+                        .id("\(selectedFont)-\(fontSize)")
                         .colorScheme(colorScheme)
                         .transaction { $0.animation = nil }
                         .onAppear {
@@ -1730,6 +1855,7 @@ struct ContentView: View {
                             }) {
                                 Text("New Note")
                                     .font(.system(size: 13))
+                                    .fixedSize()
                             }
                             .buttonStyle(.plain)
                             .foregroundColor(isHoveringNewEntry ? textHoverColor : textColor)
@@ -1756,6 +1882,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringThemeToggle ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("themeToggleButton")
                             .onHover { hovering in
                                 isHoveringThemeToggle = hovering
                                 isHoveringBottomNav = hovering
@@ -1777,6 +1904,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringClock ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("historyButton")
                             .onHover { hovering in
                                 isHoveringClock = hovering
                                 isHoveringBottomNav = hovering
@@ -1907,15 +2035,16 @@ struct ContentView: View {
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
-                                            Text(entry.previewText)
+                                            Text(historyRowTitle(for: entry))
                                                 .font(.system(size: 13))
                                                 .lineLimit(1)
-                                                .foregroundColor(.primary)
+                                                .truncationMode(.tail)
+                                                .foregroundColor(entry.previewText.isEmpty ? .secondary : .primary)
 
                                             Spacer()
                                         }
 
-                                        Text(entry.date)
+                                        Text(historyRowTimestamp(for: entry))
                                             .font(.system(size: 12))
                                             .foregroundColor(.secondary)
                                     }
@@ -1968,16 +2097,18 @@ struct ContentView: View {
                     .scrollIndicators(.never)
                 }
                 .frame(width: 200)
+                .background(RailRemovalObserver { editorFocusRequest = UUID() })
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
-                .transition(.move(edge: .trailing))
+                .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .identity))
             }
 
             if showingDestinationSettings {
                 Divider()
                 destinationSettingsRail(textColor: textColor)
                     .frame(width: 260)
+                    .background(RailRemovalObserver { editorFocusRequest = UUID() })
                     .background(Color(colorScheme == .light ? .white : NSColor.black))
-                    .transition(.move(edge: .trailing))
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .identity))
             }
         }
         // Keep the editor usable at compact sizes: sidebar is fixed 200pt wide,
@@ -2011,7 +2142,21 @@ struct ContentView: View {
         } message: {
             Text(trashError ?? "")
         }
+        .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
+            newEntry: createNewEntry,
+            openHistory: {
+                if !showingSidebar {
+                    openHistorySidebar()
+                }
+            },
+            openDestinationSettings: {
+                if !showingDestinationSettings {
+                    openDestinationSettings()
+                }
+            }
+        ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
+        .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             showingDestinationSettings = false
@@ -2088,6 +2233,15 @@ struct ContentView: View {
         }
     }
     
+    private func historyRowTitle(for entry: HumanEntry) -> String {
+        entry.previewText.isEmpty ? "Untitled" : entry.previewText
+    }
+
+    private func historyRowTimestamp(for entry: HumanEntry) -> String {
+        guard let timestamp = entry.timestamp else { return entry.date }
+        return HistoryRowFormatting.timestamp(from: timestamp)
+    }
+
     private func backgroundColor(for entry: HumanEntry) -> Color {
         if entry.id == selectedEntryId {
             return Color.gray.opacity(0.1)  // More subtle selection highlight
@@ -2112,14 +2266,13 @@ struct ContentView: View {
         
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
             
             // Find and update the entry in the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-                entries[index].previewText = truncated
+                entries[index].previewText = HistoryRowFormatting.title(from: content)
+                if parseCanonicalEntryFilename(entry.filename) == nil {
+                    entries[index].timestamp = modificationDate(for: fileURL)
+                }
             }
         } catch {
             print("Error updating preview text: \(error)")
@@ -2137,6 +2290,7 @@ struct ContentView: View {
             return false
         }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
+
         
         do {
             if historyTrash?.isUneditedReplacement(at: fileURL) == true {
@@ -2200,6 +2354,7 @@ struct ContentView: View {
     }
     
     private func createNewEntry() {
+        editorFocusRequest = UUID()
         savedConfirmation = nil
         let didSave: Bool
         // Rolling / Existing: re-bind to current period/target and append a session separator.
@@ -2219,6 +2374,15 @@ struct ContentView: View {
 
         savedConfirmation = NoteSaveConfirmation.message(didSave: didSave, destinationName: activeDestinationDisplayName)
         savedConfirmationID = UUID()
+    }
+
+    private func startQuickCapture() {
+        showingSidebar = false
+        if !hasUnsavedDestinationSettingsChanges {
+            showingDestinationSettings = false
+        }
+        createNewEntry()
+        quickCaptureFocusRequest = UUID()
     }
 
     @ViewBuilder
@@ -2260,7 +2424,8 @@ struct ContentView: View {
             .foregroundColor(isHoveringDestinationChip ? textHoverColor : textColor)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(-1)
         .onHover { hovering in
             isHoveringDestinationChip = hovering
             isHoveringBottomNav = hovering

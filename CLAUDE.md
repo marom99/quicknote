@@ -1,4 +1,4 @@
-# Freewrite - Technical Documentation for AI Agents
+# Quick Note - Technical Documentation for AI Agents
 
 > **⚠️ IMPORTANT FOR AI AGENTS**: This file (`AGENTS.md`) and `CLAUDE.md` are clones and must be kept in sync.
 >
@@ -10,9 +10,9 @@
 
 ## Product Vision & User Experience
 
-### What is Freewrite?
+### What is Quick Note?
 
-Freewrite is a **distraction-free writing environment** for macOS designed around the concept of stream-of-consciousness writing and video journaling. The core philosophy is to remove barriers between thought and writing by creating a minimalist, opinionated interface that prioritizes the act of writing over formatting, organization, or editing.
+Quick Note is a **distraction-free writing environment** for macOS designed around the concept of stream-of-consciousness writing and video journaling. The core philosophy is to remove barriers between thought and writing by creating a minimalist, opinionated interface that prioritizes the act of writing over formatting, organization, or editing.
 
 ### User Experience Philosophy
 
@@ -50,7 +50,7 @@ Freewrite is a **distraction-free writing environment** for macOS designed aroun
 
 ## Overview
 
-Freewrite is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Freewrite/`, and writers can add additional named destinations pointing at other folders.
+Quick Note is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Quick Note/`, and writers can add additional named destinations pointing at other folders.
 
 ## Architecture
 
@@ -69,6 +69,7 @@ freewrite/
 ├── freewrite/
 │   ├── freewriteApp.swift        # App entry point
 │   ├── ContentView.swift         # Main view (1400+ lines)
+│   ├── QuickCapture.swift        # Carbon hotkey + menu-bar capture routing
 │   ├── DestinationStore.swift    # Named destinations + save modes
 │   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
 │   ├── VideoRecordingView.swift  # Video recording interface
@@ -92,27 +93,30 @@ struct HumanEntry: Identifiable {
     let id: UUID
     let date: String              // Display format: "MMM d" (e.g., "Feb 20")
     let filename: String          // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].md
-    var previewText: String       // First 30 chars or "Video Entry"
+    var previewText: String       // History title: first non-blank line (HistoryRowFormatting.title) or video transcript preview
     var entryType: EntryType      // .text or .video
     var videoFilename: String?    // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].mov
+    var timestamp: Date?          // History row time: filename timestamp (canonical) or file modification date
 }
 ```
 
 ### File Storage
 
-**Default location**: `~/Documents/Freewrite/` (always available as the first named destination)
+**Default location**: `~/Documents/Quick Note/` (always available as the first named destination)
+
+**Legacy Freewrite migration**: on first resolve, an existing `~/Documents/Freewrite/` is moved to `~/Documents/Quick Note/` when no `Quick Note` folder exists yet (if the move fails, the legacy folder stays in use). A persisted default destination still named `Freewrite` is renamed to `Quick Note`; user-chosen names are kept.
 
 **Named save destinations**:
 - Writers pick additional journal folders via the bottom-left destination menu (`Add destination…`).
 - Each destination has a display name (defaults to the folder name) and an optional security-scoped bookmark for user-picked paths.
-- The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
+- The default Quick Note folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
   - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
-  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Note; New Note appends `\n---\nyyyy-MM-dd HH:mm\n`.
+  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Note; New Note appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
 - Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.
-- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized.
+- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized. Each row shows the note's first non-blank line as its title (empty notes read "Untitled") and the day plus time (`HistoryRowFormatting`).
 - **Destination settings** rail opens from the destination menu (`Destination settings…`); mutually exclusive with History; edits the active destination only; changes apply immediately and re-resolve the write target. Out of v1: video into rolling, subfolders in format, folder rebind.
 - `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; pure helpers live in `DestinationWriteTarget.swift`; `ContentView` wires the chip/menu UI, settings rail, resolve/bind, and journal reload on switch.
 - Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
@@ -142,7 +146,7 @@ struct HumanEntry: Identifiable {
   - `[UUID]-[YYYY-MM-DD-HH-mm-ss].mov`
   - `thumbnail.jpg`
   - `transcript.md` (optional; speech transcript for that recording)
-- Example directory: `~/Documents/Freewrite/Videos/[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04]/`
+- Example directory: `~/Documents/Quick Note/Videos/[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04]/`
 
 ## Key Components
 
@@ -243,8 +247,8 @@ struct VideoPlayerView: View {
 │ 📹 Video...  │ ← Video entry with thumbnail
 │ Feb 20       │
 ├──────────────┤
-│ This is a... │ ← Text entry with preview
-│ Feb 19       │
+│ Ideas for... │ ← First line as title (tail-truncated)
+│ Feb 19, 9:41 AM │ ← Day plus time
 ├──────────────┤
 │ Another ...  │
 │ Feb 18       │
@@ -269,6 +273,13 @@ struct VideoPlayerView: View {
 - **Theme Toggle**: 🌙/☀️ for dark/light mode
 - **History**: 🕐 Shows/hides sidebar
 
+### Keyboard Shortcuts
+
+- **Cmd+N**: New Note, using `createNewEntry()` just like the bottom-nav button (not a new window).
+- **Cmd+Shift+H**: Opens History via `openHistorySidebar()`, preserving the unsaved destination-settings confirmation; does not close History if already open.
+- **Cmd+,**: Opens the active destination settings rail via `openDestinationSettings()`; does not reset unsaved edits if already open.
+- `EditorCommands` is attached to the app scene with `.commands`; it replaces `.newItem` and `.appSettings` to avoid duplicate shortcuts. `ContentView` publishes `EditorCommandActions` with `.focusedSceneValue`, so commands target only the focused window and are disabled without one.
+
 ## Video Recording Flow
 
 1. User clicks video camera icon (🎥)
@@ -287,10 +298,10 @@ struct VideoPlayerView: View {
    - Speech transcript is finalized (spacing + sentence endings/capitalization)
    - `onRecordingComplete` closure called with temp URL + finalized transcript
 10. `saveVideoEntry(from:transcript:)` called
-   - Creates per-entry video directory in `~/Documents/Freewrite/Videos/[UUID]-[date]/`
-   - Video copied from temp to `~/Documents/Freewrite/Videos/[UUID]-[date]/[UUID]-[date].mov`
-   - Thumbnail generated once and saved to `~/Documents/Freewrite/Videos/[UUID]-[date]/thumbnail.jpg`
-   - Transcript saved to `~/Documents/Freewrite/Videos/[UUID]-[date]/transcript.md` when available
+   - Creates per-entry video directory in `~/Documents/Quick Note/Videos/[UUID]-[date]/`
+   - Video copied from temp to `~/Documents/Quick Note/Videos/[UUID]-[date]/[UUID]-[date].mov`
+   - Thumbnail generated once and saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/thumbnail.jpg`
+   - Transcript saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/transcript.md` when available
    - Metadata file created: `[UUID]-[date].md` with "Video Entry"
    - Entry added to `entries` array (on main thread), selected immediately, and loaded into the main view
    - Playback starts automatically with audio enabled
@@ -307,6 +318,14 @@ struct VideoPlayerView: View {
 4. Main view checks `if let videoURL = currentVideoURL`
 5. Shows `VideoPlayerView(videoURL:)` instead of TextEditor
 6. Video auto-plays muted with standard AVKit controls
+
+## Quick capture (global hotkey + menu bar)
+
+- ⌃⌥⌘N uses Carbon hotkey registration (no Accessibility permission); the menu-bar pencil also offers Quick Capture, Show Window, and Quit.
+- Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
+- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor. The current ContentView has no recording overlay presentation path; if recording is restored, skip capture while that overlay is visible.
+- `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
+- Before capture, native editor input is suspended and first responder resigned; capture runs before raising the window. Input resumes only after the SwiftUI editor update applies the new capture text, preventing immediate typing from copying stale native text into the new note.
 
 ## Entry Loading Logic
 
@@ -333,7 +352,7 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
-`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging.
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging. Opening or leaving a History note without editing does not change its modification time. Non-canonical History rows display that time.
 
 An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
 
@@ -361,9 +380,9 @@ Required entitlements in `freewrite.entitlements`:
 Privacy usage descriptions (in Xcode project build settings):
 
 ```
-INFOPLIST_KEY_NSCameraUsageDescription = "Freewrite needs camera access to record video entries."
-INFOPLIST_KEY_NSMicrophoneUsageDescription = "Freewrite needs microphone access to record audio with your video entries."
-INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Freewrite uses speech recognition to transcribe your video entries."
+INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries."
+INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries."
+INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Quick Note uses speech recognition to transcribe your video entries."
 ```
 
 ## Technical Nuances & Implementation Details
@@ -864,13 +883,14 @@ if session.isRunning {
 Always use absolute paths:
 ```swift
 let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("Freewrite")
+    .appendingPathComponent("Quick Note")
 let fileURL = documentsDirectory.appendingPathComponent(filename)
 ```
 
 ## Build Configuration
 
 **Scheme**: freewrite
+**Product**: `Quick Note.app` (`PRODUCT_NAME = "Quick Note"`, which sets the menu bar and About name; `PRODUCT_MODULE_NAME = freewrite` keeps `@testable import freewrite`; bundle id stays `app.humansongs.freewrite` so the sandbox container and preferences carry over)
 **Configuration**: Debug or Release
 **Build Command**:
 ```bash
@@ -960,7 +980,7 @@ Enable console output in Xcode to see:
 - Entry creation: "Successfully created video entry"
 - Errors: "Error saving video entry: ..."
 
-Check `~/Documents/Freewrite/` in Finder to verify files are being created.
+Check `~/Documents/Quick Note/` in Finder to verify files are being created.
 
 ## Code Organization
 
@@ -991,7 +1011,7 @@ The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeSc
 
 ## Summary
 
-Freewrite is a straightforward macOS writing app with video recording capabilities. All data is local, no backend required. The main complexity is in:
+Quick Note is a straightforward macOS writing app with video recording capabilities. All data is local, no backend required. The main complexity is in:
 
 1. Proper file management and UUID-based naming
 2. Thread-safe array mutations for entries

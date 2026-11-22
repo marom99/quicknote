@@ -81,7 +81,10 @@ struct SaveDestination: Identifiable, Codable, Equatable {
         self.existingNoteFilename = existingNoteFilename
     }
 
-    static func makeDefault(displayName: String = "Freewrite") -> SaveDestination {
+    static let defaultDisplayName = "Quick Note"
+    static let legacyDefaultDisplayName = "Freewrite"
+
+    static func makeDefault(displayName: String = defaultDisplayName) -> SaveDestination {
         SaveDestination(id: UUID(), displayName: displayName, bookmarkData: nil, isDefault: true)
     }
 
@@ -156,9 +159,31 @@ final class DestinationStore: ObservableObject {
         destinations.first(where: { $0.id == activeDestinationId })
     }
 
-    static func defaultFreewriteURL(fileManager: FileManager = .default) -> URL {
-        let directory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Freewrite", isDirectory: true)
+    static let defaultFolderName = "Quick Note"
+    static let legacyDefaultFolderName = "Freewrite"
+
+    static func defaultDocumentsURL(fileManager: FileManager = .default) -> URL {
+        let parent = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return defaultDocumentsURL(in: parent, fileManager: fileManager)
+    }
+
+    /// Resolves the default journal folder under `parent`, moving a legacy
+    /// `Freewrite` folder to `Quick Note` the first time. If the move fails the
+    /// legacy folder keeps being used so existing notes never disappear.
+    static func defaultDocumentsURL(in parent: URL, fileManager: FileManager = .default) -> URL {
+        let directory = parent.appendingPathComponent(defaultFolderName, isDirectory: true)
+        let legacyDirectory = parent.appendingPathComponent(legacyDefaultFolderName, isDirectory: true)
+
+        if !fileManager.fileExists(atPath: directory.path),
+           fileManager.fileExists(atPath: legacyDirectory.path) {
+            do {
+                try fileManager.moveItem(at: legacyDirectory, to: directory)
+            } catch {
+                print("Could not move \(legacyDirectory.path) to \(directory.path): \(error)")
+                return legacyDirectory
+            }
+        }
+
         if !fileManager.fileExists(atPath: directory.path) {
             try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         }
@@ -379,7 +404,7 @@ final class DestinationStore: ObservableObject {
 
     private func resolveAccess(for destination: SaveDestination, fileManager: FileManager = .default) -> DestinationAccessResult {
         if destination.isDefault {
-            let url = Self.defaultFreewriteURL(fileManager: fileManager)
+            let url = Self.defaultDocumentsURL(fileManager: fileManager)
             scopedURL = nil
             return .accessible(url)
         }
@@ -438,8 +463,17 @@ final class DestinationStore: ObservableObject {
 
     private static func seedIfNeeded(userDefaults: UserDefaults) -> (destinations: [SaveDestination], activeId: UUID) {
         if let data = userDefaults.data(forKey: destinationsKey),
-           let decoded = try? JSONDecoder().decode([SaveDestination].self, from: data),
+           var decoded = try? JSONDecoder().decode([SaveDestination].self, from: data),
            !decoded.isEmpty {
+            var renamedLegacyDefault = false
+            for index in decoded.indices
+            where decoded[index].isDefault && decoded[index].displayName == SaveDestination.legacyDefaultDisplayName {
+                decoded[index].displayName = SaveDestination.defaultDisplayName
+                renamedLegacyDefault = true
+            }
+            if renamedLegacyDefault, let migrated = try? JSONEncoder().encode(decoded) {
+                userDefaults.set(migrated, forKey: destinationsKey)
+            }
             let activeIdString = userDefaults.string(forKey: activeDestinationIdKey)
             let activeId = decoded.first(where: { $0.id.uuidString == activeIdString })?.id ?? decoded[0].id
             return (decoded, activeId)
