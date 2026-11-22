@@ -395,6 +395,8 @@ struct ContentView: View {
     private let selectedFont: String = "Lato-Regular"
     private let fontSize: CGFloat = 14
     @State private var bottomNavOpacity: Double = 1.0
+    @State private var savedConfirmation: String?
+    @State private var savedConfirmationID = UUID()
     @State private var isHoveringBottomNav = false
     @State private var selectedEntryIndex: Int = 0
     @State private var scrollOffset: CGFloat = 0
@@ -403,6 +405,7 @@ struct ContentView: View {
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
+    @State private var noteSaveState = NoteSaveState()
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var showingDestinationSettings = false
@@ -425,6 +428,7 @@ struct ContentView: View {
     @State private var pendingDestinationSettingsCloseAction: DestinationSettingsCloseAction? = nil
     @State private var showingDiscardDestinationSettingsConfirmation = false
     @State private var inProgressCaptureFilename: String? = nil
+    @State private var liveCaptureDraftRegistration: LiveCaptureDraftRegistration?
     @State private var captureStartedAt: Date? = nil
     @State private var historyTrash: HistoryTrash? = nil
     @State private var trashedEntry: HumanEntry? = nil
@@ -680,7 +684,7 @@ struct ContentView: View {
 
     private func previewTextFromTranscript(_ transcript: String?) -> String {
         guard let transcript else {
-            return "Video Entry"
+            return "Video Note"
         }
 
         let normalized = transcript
@@ -689,7 +693,7 @@ struct ContentView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !normalized.isEmpty else {
-            return "Video Entry"
+            return "Video Note"
         }
 
         var preview = String(normalized.prefix(10))
@@ -699,7 +703,7 @@ struct ContentView: View {
         }
 
         if preview.isEmpty {
-            return "Video Entry"
+            return "Video Note"
         }
 
         return preview + "..."
@@ -786,6 +790,7 @@ struct ContentView: View {
     }
 
     private func beginFreshCaptureSession(clearText: Bool) {
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -804,8 +809,13 @@ struct ContentView: View {
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(filename)
         if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                return
+            }
         }
+        noteSaveState.forget(fileURL)
     }
 
     private func removeEntry(withFilename filename: String) {
@@ -818,20 +828,30 @@ struct ContentView: View {
         }
     }
 
-    private func moveCaptureFile(from sourceFilename: String, to destinationFilename: String, in documentsDirectory: URL) {
+    @discardableResult
+    private func moveCaptureFile(from sourceFilename: String, to destinationFilename: String, in documentsDirectory: URL) -> Bool {
         let sourceURL = documentsDirectory.appendingPathComponent(sourceFilename)
         let destinationURL = documentsDirectory.appendingPathComponent(destinationFilename)
-        guard sourceFilename != destinationFilename else { return }
-        guard fileManager.fileExists(atPath: sourceURL.path) else { return }
+        guard sourceFilename != destinationFilename else { return true }
+        guard fileManager.fileExists(atPath: sourceURL.path) else { return false }
 
         if fileManager.fileExists(atPath: destinationURL.path) {
-            try? fileManager.removeItem(at: destinationURL)
+            do {
+                try fileManager.removeItem(at: destinationURL)
+                noteSaveState.forget(destinationURL)
+            } catch {
+                return false
+            }
         }
 
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            noteSaveState.forget(sourceURL)
+            noteSaveState.forget(destinationURL)
+            return true
         } catch {
             print("Error renaming capture file: \(error)")
+            return false
         }
     }
 
@@ -879,6 +899,9 @@ struct ContentView: View {
             )
         case .title:
             filename = DestinationWriteTarget.captureDraftFilename(captureId: captureId)
+            liveCaptureDraftRegistration = LiveCaptureDraftRegistration(
+                fileURL: documentsDirectory.appendingPathComponent(filename)
+            )
         }
 
         inProgressCaptureFilename = filename
@@ -905,6 +928,7 @@ struct ContentView: View {
             if let filename = inProgressCaptureFilename {
                 deleteCaptureFileIfExists(filename)
                 removeEntry(withFilename: filename)
+                liveCaptureDraftRegistration = nil
                 inProgressCaptureFilename = nil
                 captureStartedAt = nil
             }
@@ -922,29 +946,31 @@ struct ContentView: View {
         saveEntry(entry: entry)
     }
 
-    private func finalizeCaptureSession() {
+    @discardableResult
+    private func finalizeCaptureSession() -> Bool {
         guard isCapturePerSessionMode else {
             if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
                currentEntry.entryType == .text {
                 saveEntry(entry: currentEntry, updatePreview: false)
             }
-            return
+            return false
         }
 
-        guard let draftFilename = inProgressCaptureFilename else { return }
-        guard let documentsDirectory = getDocumentsDirectory() else { return }
+        guard let draftFilename = inProgressCaptureFilename else { return false }
+        guard let documentsDirectory = getDocumentsDirectory() else { return false }
 
         let trimmed = normalizedCaptureContent(text)
         if trimmed.isEmpty {
             deleteCaptureFileIfExists(draftFilename)
             removeEntry(withFilename: draftFilename)
             beginFreshCaptureSession(clearText: true)
-            return
+            return false
         }
 
+        var didSave = false
         if let entry = entries.first(where: { $0.filename == draftFilename }) {
-            saveEntry(entry: entry, updatePreview: true)
+            didSave = saveEntry(entry: entry, updatePreview: true)
         }
 
         let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
@@ -964,11 +990,15 @@ struct ContentView: View {
             )
 
             if finalFilename != draftFilename {
-                moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory)
-                updateEntryFilename(from: draftFilename, to: finalFilename)
+                if moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) {
+                    updateEntryFilename(from: draftFilename, to: finalFilename)
+                } else {
+                    didSave = false
+                }
             }
         }
 
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -976,6 +1006,7 @@ struct ContentView: View {
         text = ""
         isLoadingEntry = false
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+        return didSave
     }
 
     private func entryDisplayDate(from date: Date) -> String {
@@ -1074,7 +1105,7 @@ struct ContentView: View {
             didCopyTranscript = false
             text = ""
             placeholderText = "Choose a note in Destination settings"
-            return true
+            return !appendSeparator
         }
 
         let createIfMissing = destination.saveMode == .rolling
@@ -1089,7 +1120,7 @@ struct ContentView: View {
             selectedVideoHasTranscript = false
             didCopyTranscript = false
             text = ""
-            return true
+            return !appendSeparator
         }
 
         // Missing paths stay unbound until a nonempty edit resolves the target.
@@ -1105,7 +1136,7 @@ struct ContentView: View {
             } else {
                 placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
             }
-            return true
+            return !appendSeparator
         }
 
         let entry = entryForResolvedTarget(target)
@@ -1120,7 +1151,9 @@ struct ContentView: View {
             text += DestinationWriteTarget.sessionSeparator()
             selectedEntryId = entry.id
             isLoadingEntry = false
-            saveEntry(entry: entry)
+            let didSave = saveEntry(entry: entry)
+            placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
+            return didSave
         } else {
             selectedEntryId = entry.id
             isLoadingEntry = false
@@ -1348,6 +1381,7 @@ struct ContentView: View {
         selectedVideoHasTranscript = false
         didCopyTranscript = false
         thumbnailMemoryCache.removeAllObjects()
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         text = ""
@@ -1429,6 +1463,14 @@ struct ContentView: View {
         }
         
         do {
+            let failedDrafts = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(
+                in: documentsDirectory,
+                excluding: inProgressCaptureFilename,
+                fileManager: fileManager
+            )
+            for draft in failedDrafts {
+                print("Could not recover capture draft: \(draft.lastPathComponent)")
+            }
             let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
             let mdFiles = fileURLs.filter {
                 $0.pathExtension == "md"
@@ -1458,7 +1500,11 @@ struct ContentView: View {
             print("Successfully loaded and sorted \(loadedEntries.count) entries")
 
             // Now assign to the state variable
+            let liveEntry = entries.first { $0.filename == inProgressCaptureFilename }
             entries = loadedEntries
+            if let liveEntry, !entries.contains(where: { $0.filename == liveEntry.filename }) {
+                entries.insert(liveEntry, at: 0)
+            }
 
             // Rolling / Existing: bind to resolved write target (skip new-note launch rules).
             if activeSaveMode == .rolling || activeSaveMode == .existing {
@@ -1467,14 +1513,16 @@ struct ContentView: View {
             }
 
             // New note: load history, start with a fresh empty capture session.
-            beginFreshCaptureSession(clearText: true)
+            if inProgressCaptureFilename == nil {
+                beginFreshCaptureSession(clearText: true)
+            }
             
         } catch {
             print("Error loading directory contents: \(error)")
             print("Creating default entry after error")
             if activeSaveMode == .rolling || activeSaveMode == .existing {
                 _ = bindToResolvedWriteTarget(appendSeparator: false)
-            } else {
+            } else if inProgressCaptureFilename == nil {
                 beginFreshCaptureSession(clearText: true)
             }
         }
@@ -1527,7 +1575,7 @@ struct ContentView: View {
             if let selectedEntryId,
                let entry = entries.first(where: { $0.id == selectedEntryId }) {
                 if entry.entryType == .video {
-                    return entry.previewText.isEmpty ? "Video Entry" : entry.previewText
+                    return entry.previewText.isEmpty ? "Video Note" : entry.previewText
                 }
                 if let fromFilename = titleBarDateFromCaptureFilename(entry.filename) {
                     return fromFilename
@@ -1544,7 +1592,7 @@ struct ContentView: View {
         }
 
         if entry.entryType == .video {
-            return entry.previewText.isEmpty ? "Video Entry" : entry.previewText
+            return entry.previewText.isEmpty ? "Video Note" : entry.previewText
         }
 
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1680,7 +1728,7 @@ struct ContentView: View {
                             Button(action: {
                                 createNewEntry()
                             }) {
-                                Text("New Entry")
+                                Text("New Note")
                                     .font(.system(size: 13))
                             }
                             .buttonStyle(.plain)
@@ -1753,6 +1801,31 @@ struct ContentView: View {
                             .frame(height: 1)
                     }
                     .opacity(bottomNavOpacity)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let savedConfirmation {
+                            Text(savedConfirmation)
+                                .font(.system(size: 13))
+                                .foregroundColor(textColor)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(colorScheme == .light ? .white : .black))
+                                .offset(y: -bottomNavHeight)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .task(id: savedConfirmationID) {
+                        guard savedConfirmation != nil else { return }
+                        do {
+                            try await Task.sleep(nanoseconds: 2_000_000_000)
+                        } catch {
+                            return
+                        }
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            savedConfirmation = nil
+                        }
+                    }
                         .onHover { hovering in
                             isHoveringBottomNav = hovering
                             if hovering {
@@ -1884,7 +1957,7 @@ struct ContentView: View {
                                 .onHover { hovering in
                                     hoveredEntryId = hovering ? entry.id : nil
                                 }
-                                .help("Click to select this entry")
+                                .help("Click to select this note")
 
                                 if entry.id != entries.last?.id {
                                     Divider()
@@ -1994,6 +2067,7 @@ struct ContentView: View {
                 if !entries.contains(where: { $0.id == entry.id }) {
                     entries.insert(entry, at: 0)
                 }
+                noteSaveState.forget(target.fileURL)
                 selectedEntryId = entry.id
                 saveEntry(entry: entry)
             }
@@ -2052,29 +2126,32 @@ struct ContentView: View {
         }
     }
     
-    private func saveEntry(entry: HumanEntry, updatePreview: Bool = true) {
+    @discardableResult
+    private func saveEntry(entry: HumanEntry, updatePreview: Bool = true) -> Bool {
         guard entry.entryType == .text else {
-            return
+            return false
         }
 
         guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
             print("Skipping save — active destination unavailable")
-            return
+            return false
         }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
             if historyTrash?.isUneditedReplacement(at: fileURL) == true {
-                if text.isEmpty { return }
+                if text.isEmpty { return true }
                 historyTrash?.invalidateReplacement()
             }
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            text = try noteSaveState.save(text, to: fileURL)
             print("Successfully saved entry: \(entry.filename)")
             if updatePreview {
                 updatePreviewText(for: entry)
             }
+            return true
         } catch {
             print("Error saving entry: \(error)")
+            return false
         }
     }
     
@@ -2108,6 +2185,7 @@ struct ContentView: View {
                     let rawText = try String(contentsOf: fileURL, encoding: .utf8)
                     // Strip legacy leading newlines from older entries
                     text = String(rawText.drop(while: { $0 == "\n" }))
+                    noteSaveState.didLoad(text, from: fileURL)
                     print("Successfully loaded entry: \(entry.filename)")
                 } else {
                     // Soft-fail missing file (e.g. Existing note removed from disk).
@@ -2122,19 +2200,25 @@ struct ContentView: View {
     }
     
     private func createNewEntry() {
+        savedConfirmation = nil
+        let didSave: Bool
         // Rolling / Existing: re-bind to current period/target and append a session separator.
         if activeSaveMode == .rolling || activeSaveMode == .existing {
             if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
-               currentEntry.entryType == .text {
-                saveEntry(entry: currentEntry, updatePreview: false)
+               currentEntry.entryType == .text,
+               !saveEntry(entry: currentEntry, updatePreview: false) {
+                // Keep unsaved text in the editor instead of reloading the file from disk.
+                return
             }
-            _ = bindToResolvedWriteTarget(appendSeparator: true)
-            return
+            didSave = bindToResolvedWriteTarget(appendSeparator: true)
+        } else {
+            didSave = finalizeCaptureSession()
+            beginFreshCaptureSession(clearText: true)
         }
 
-        finalizeCaptureSession()
-        beginFreshCaptureSession(clearText: true)
+        savedConfirmation = NoteSaveConfirmation.message(didSave: didSave, destinationName: activeDestinationDisplayName)
+        savedConfirmationID = UUID()
     }
 
     @ViewBuilder
@@ -2278,8 +2362,8 @@ struct ContentView: View {
                                                 .font(.system(size: 13))
                                                 .foregroundColor(textColor)
                                             Text(format == .date
-                                                 ? "Date and time when capture starts"
-                                                 : "First paragraph when capture closes")
+                                                 ? "Date and time when the note starts"
+                                                 : "First paragraph when the note closes")
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.secondary)
                                         }
@@ -2453,6 +2537,7 @@ struct ContentView: View {
                 thumbnailMemoryCache.removeObject(forKey: videoFilename as NSString)
             }
 
+            noteSaveState.forget(fileURL)
             historyTrash = trash
             trashedEntry = entry
             trashedEntryIndex = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
@@ -2470,6 +2555,7 @@ struct ContentView: View {
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries.remove(at: index)
                 if inProgressCaptureFilename == entry.filename {
+                    liveCaptureDraftRegistration = nil
                     inProgressCaptureFilename = nil
                     captureStartedAt = nil
                 }
