@@ -1,6 +1,31 @@
 import CryptoKit
 import Foundation
 
+final class LiveCaptureDraftRegistration {
+    private static let lock = NSLock()
+    private static var drafts: [UUID: URL] = [:]
+    private let id = UUID()
+
+    init(fileURL: URL) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts[id] = fileURL.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    deinit {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts.removeValue(forKey: id)
+    }
+
+    static func contains(_ fileURL: URL) -> Bool {
+        let normalizedURL = fileURL.resolvingSymlinksInPath().standardizedFileURL
+        lock.lock()
+        defer { lock.unlock() }
+        return drafts.values.contains(normalizedURL)
+    }
+}
+
 /// Pure helpers for resolving per-destination write targets (rolling / existing modes).
 enum DestinationWriteTarget {
     struct ResolvedTarget: Equatable {
@@ -150,6 +175,45 @@ enum DestinationWriteTarget {
         "\(captureDraftPrefix)\(captureId.uuidString).md"
     }
 
+    @discardableResult
+    static func recoverOrphanedCaptureDrafts(
+        in documentsURL: URL,
+        excluding liveDraftFilename: String? = nil,
+        fileManager: FileManager = .default
+    ) throws -> [URL] {
+        let files = try fileManager.contentsOfDirectory(
+            at: documentsURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .creationDateKey, .contentModificationDateKey]
+        )
+        var failedDrafts: [URL] = []
+        for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard isCaptureDraftFilename(file.lastPathComponent),
+                  file.lastPathComponent != liveDraftFilename,
+                  !LiveCaptureDraftRegistration.contains(file) else { continue }
+            do {
+                let values = try file.resourceValues(forKeys: [.isRegularFileKey, .creationDateKey, .contentModificationDateKey])
+                guard values.isRegularFile == true else { continue }
+                let content = try String(contentsOf: file, encoding: .utf8)
+                if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try fileManager.removeItem(at: file)
+                    continue
+                }
+                let fallbackDate = values.creationDate ?? values.contentModificationDate ?? Date()
+                let basename = sanitizedTitleBasename(from: content) ?? dateCaptureBasename(now: fallbackDate)
+                let filename = uniqueMarkdownFilename(
+                    preferredBasename: basename,
+                    documentsURL: documentsURL,
+                    fileManager: fileManager,
+                    excluding: file.lastPathComponent
+                )
+                try fileManager.moveItem(at: file, to: documentsURL.appendingPathComponent(filename))
+            } catch {
+                failedDrafts.append(file)
+            }
+        }
+        return failedDrafts
+    }
+
     static func uniqueMarkdownFilename(
         preferredBasename: String,
         documentsURL: URL,
@@ -225,6 +289,24 @@ enum DestinationWriteTarget {
 
     // MARK: - Resolve write target
 
+    static func contentForUnboundEdit(_ content: String, target: ResolvedTarget) throws -> String {
+        let existing = try String(contentsOf: target.fileURL, encoding: .utf8)
+        guard !existing.isEmpty else { return content }
+        return existing + (existing.hasSuffix("\n") ? "" : "\n") + content
+    }
+
+    static func resolveForUnboundEdit(
+        content: String,
+        destination: SaveDestination,
+        documentsURL: URL,
+        now: Date = Date()
+    ) -> ResolvedTarget? {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let target = resolve(for: destination, documentsURL: documentsURL, now: now),
+              target.fileExists else { return nil }
+        return target
+    }
+
     /// Resolves the file the editor should bind to for Rolling / Existing modes.
     /// Creates the file when missing (except Existing soft-fail when no filename is configured).
     static func resolve(
@@ -282,7 +364,9 @@ enum DestinationWriteTarget {
         let fileURL = documentsURL.appendingPathComponent(filename)
         let pathKey = fileURL.standardizedFileURL.path
         let entryId = stableUUID(fromPath: pathKey)
-        let exists = fileManager.fileExists(atPath: fileURL.path)
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+        guard !isDirectory.boolValue else { return nil }
         var didCreate = false
 
         if !exists && createIfMissing {

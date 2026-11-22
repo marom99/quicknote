@@ -69,6 +69,7 @@ freewrite/
 ├── freewrite/
 │   ├── freewriteApp.swift        # App entry point
 │   ├── ContentView.swift         # Main view (1400+ lines)
+│   ├── QuickCapture.swift        # Carbon hotkey + menu-bar capture routing
 │   ├── DestinationStore.swift    # Named destinations + save modes
 │   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
 │   ├── VideoRecordingView.swift  # Video recording interface
@@ -92,9 +93,10 @@ struct HumanEntry: Identifiable {
     let id: UUID
     let date: String              // Display format: "MMM d" (e.g., "Feb 20")
     let filename: String          // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].md
-    var previewText: String       // First 30 chars or "Video Entry"
+    var previewText: String       // History title: first non-blank line (HistoryRowFormatting.title) or video transcript preview
     var entryType: EntryType      // .text or .video
     var videoFilename: String?    // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].mov
+    var timestamp: Date?          // History row time: filename timestamp (canonical) or file modification date
 }
 ```
 
@@ -108,11 +110,11 @@ struct HumanEntry: Identifiable {
 - The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
   - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
-  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n`.
+  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Note; New Note appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
 - Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.
-- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized.
+- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized. Each row shows the note's first non-blank line as its title (empty notes read "Untitled") and the day plus time (`HistoryRowFormatting`).
 - **Destination settings** rail opens from the destination menu (`Destination settings…`); mutually exclusive with History; edits the active destination only; changes apply immediately and re-resolve the write target. Out of v1: video into rolling, subfolders in format, folder rebind.
 - `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; pure helpers live in `DestinationWriteTarget.swift`; `ContentView` wires the chip/menu UI, settings rail, resolve/bind, and journal reload on switch.
 - Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
@@ -120,8 +122,9 @@ struct HumanEntry: Identifiable {
 **New note capture lifecycle**:
 - A capture starts only when the blank, unbound canvas receives non-whitespace text. Date captures autosave directly to their final timestamp filename; Title captures autosave to a hidden `.quicknote-capture-[UUID].md` draft.
 - Selecting a saved History entry binds the editor to that file. Subsequent edits, including clearing all text, must save that selected file and must not start a new capture.
-- A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Entry, closing the window, or terminating the app.
+- A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Note, closing the window, or terminating the app.
 - Empty live captures are deleted. A nonempty Title capture is renamed from its hidden draft to a sanitized first-paragraph filename (80 characters maximum), with a timestamp fallback and `-2`, `-3`, etc. collision suffixes.
+- Journal loading recovers orphaned title drafts (for example after Force Quit) into normal History files using the same title rules and deletes whitespace-only orphans. A process-wide, destination-path-scoped registry protects live drafts in every window until finalization, discard, or view teardown; unreadable drafts remain on disk for a later retry.
 - Finalization must run while the capture's destination is still active because autosave, draft cleanup, and title renaming all resolve against the active destination directory.
 
 **Location** (active destination root):
@@ -242,8 +245,8 @@ struct VideoPlayerView: View {
 │ 📹 Video...  │ ← Video entry with thumbnail
 │ Feb 20       │
 ├──────────────┤
-│ This is a... │ ← Text entry with preview
-│ Feb 19       │
+│ Ideas for... │ ← First line as title (tail-truncated)
+│ Feb 19, 9:41 AM │ ← Day plus time
 ├──────────────┤
 │ Another ...  │
 │ Feb 18       │
@@ -264,9 +267,16 @@ struct VideoPlayerView: View {
 - **Chat**: Opens AI chat menu (ChatGPT/Claude integration)
 - **Backspace Toggle**: Enable/disable backspace key
 - **Fullscreen**: Toggle fullscreen mode
-- **New Entry**: Finalizes the active New note capture and returns to a blank canvas; Rolling / Existing append a timestamped session separator
+- **New Note**: Finalizes the active New note capture and returns to a blank canvas; Rolling / Existing append a timestamped session separator. A successful nonempty finalization or separator write shows “Saved to <destination name>” above the bottom nav for about two seconds, then fades. Empty canvases and failed writes show no confirmation. The label uses the nav’s muted 13px styling without extra chrome; write/rename success propagates to the confirmation decision.
 - **Theme Toggle**: 🌙/☀️ for dark/light mode
 - **History**: 🕐 Shows/hides sidebar
+
+### Keyboard Shortcuts
+
+- **Cmd+N**: New Entry, using `createNewEntry()` just like the bottom-nav button (not a new window).
+- **Cmd+Shift+H**: Opens History via `openHistorySidebar()`, preserving the unsaved destination-settings confirmation; does not close History if already open.
+- **Cmd+,**: Opens the active destination settings rail via `openDestinationSettings()`; does not reset unsaved edits if already open.
+- `EditorCommands` is attached to the app scene with `.commands`; it replaces `.newItem` and `.appSettings` to avoid duplicate shortcuts. `ContentView` publishes `EditorCommandActions` with `.focusedSceneValue`, so commands target only the focused window and are disabled without one.
 
 ## Video Recording Flow
 
@@ -307,6 +317,14 @@ struct VideoPlayerView: View {
 5. Shows `VideoPlayerView(videoURL:)` instead of TextEditor
 6. Video auto-plays muted with standard AVKit controls
 
+## Quick capture (global hotkey + menu bar)
+
+- ⌃⌥⌘N uses Carbon hotkey registration (no Accessibility permission); the menu-bar pencil also offers Quick Capture, Show Window, and Quit.
+- Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
+- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor. The current ContentView has no recording overlay presentation path; if recording is restored, skip capture while that overlay is visible.
+- `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
+- Before capture, native editor input is suspended and first responder resigned; capture runs before raising the window. Input resumes only after the SwiftUI editor update applies the new capture text, preventing immediate typing from copying stale native text into the new note.
+
 ## Entry Loading Logic
 
 On app launch or destination reload:
@@ -331,6 +349,12 @@ Text is auto-saved on every change. Routing depends on editor state:
 ```
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
+
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging. Opening or leaving a History note without editing does not change its modification time. Non-canonical History rows display that time.
+
+An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
+
+If the unbound target already contains text (for example, restored from Trash), its contents are preserved and the canvas text is appended on a new line; the merged text becomes the editor contents. A read failure leaves the canvas unbound and does not overwrite the target.
 
 ## Permissions
 

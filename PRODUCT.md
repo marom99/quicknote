@@ -33,7 +33,7 @@ The quietest local-first freewrite surface on macOS: open the app and you are al
 - Automatic daily empty entry / welcome entry on first launch.
 - History sidebar (200px) with entry preview, date, delete, and Finder reveal of the Freewrite folder.
 - Native window title reflecting the current entry; solid title bar matched to paper/night with a muted bottom border.
-- Bottom nav: New Entry, theme toggle, History.
+- Bottom nav: New Note, theme toggle, History. New Note briefly shows “Saved to <destination name>” only after a successful nonempty note finalization or session-separator write.
 - Light and dark appearance, persisted in UserDefaults.
 - Playback of existing video entries (AVKit), including transcript copy when a `transcript.md` is present.
 

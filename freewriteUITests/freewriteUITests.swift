@@ -32,7 +32,7 @@ final class freewriteUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.click()
         editor.typeText(seed)
-        app.buttons["New Entry"].click()
+        app.buttons["New Note"].click()
 
         app.buttons["themeToggleButton"].click()
         XCTAssertTrue(hasKeyboardFocus(app.textViews.firstMatch), "Editor lost focus after theme toggle")
