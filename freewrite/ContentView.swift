@@ -22,6 +22,7 @@ struct HumanEntry: Identifiable {
     var previewText: String
     var entryType: EntryType
     var videoFilename: String?
+    var timestamp: Date? = nil
 
     static func createNew() -> HumanEntry {
         let id = UUID()
@@ -40,7 +41,8 @@ struct HumanEntry: Identifiable {
             filename: "[\(id)]-[\(dateString)].md",
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
     }
 }
@@ -170,6 +172,7 @@ struct RailRemovalObserver: NSViewRepresentable {
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
+    var quickCaptureFocusRequest: UUID?
 
     let editorID: UUID?
     let allowsAutomaticFocus: Bool
@@ -287,6 +290,15 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastAppliedScrollRequest = request
         }
 
+        if let quickCaptureFocusRequest,
+           quickCaptureFocusRequest != context.coordinator.lastQuickCaptureFocusRequest {
+            context.coordinator.lastQuickCaptureFocusRequest = quickCaptureFocusRequest
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let textView = scrollView?.documentView as? NSTextView else { return }
+                QuickCaptureInputGate.resume(textView)
+            }
+        }
+
         context.coordinator.publishScrollMetrics()
     }
 
@@ -303,6 +315,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastQuickCaptureFocusRequest: UUID?
         var lastConfiguredEditorID: UUID?
         var lastFocusRequest: UUID?
         var lastAppliedCaretEndRequest: UUID?
@@ -361,6 +374,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
             let range = NSRange(location: (textView.string as NSString).length, length: 0)
             textView.setSelectedRange(range)
             textView.scrollRangeToVisible(range)
+            if let window = textView.window, window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+            }
             lastAppliedCaretEndRequest = request
             return true
         }
@@ -505,6 +521,7 @@ struct ContentView: View {
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var editorFocusRequest = UUID()
+    @State private var quickCaptureFocusRequest: UUID?
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
@@ -964,7 +981,8 @@ struct ContentView: View {
             filename: destinationFilename,
             previewText: existing.previewText,
             entryType: existing.entryType,
-            videoFilename: existing.videoFilename
+            videoFilename: existing.videoFilename,
+            timestamp: existing.timestamp
         )
         if selectedEntryId == existing.id {
             selectedEntryId = newId
@@ -1008,7 +1026,8 @@ struct ContentView: View {
             filename: filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
         entries.insert(entry, at: 0)
         selectedEntryId = entry.id
@@ -1146,19 +1165,17 @@ struct ContentView: View {
 
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
+            let title = HistoryRowFormatting.title(from: content)
 
             return (
                 entry: HumanEntry(
                     id: uuid,
                     date: entryDisplayDate(from: fileDate),
                     filename: filename,
-                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : truncated,
+                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
                     entryType: hasVideo ? .video : .text,
-                    videoFilename: hasVideo ? videoFilename : nil
+                    videoFilename: hasVideo ? videoFilename : nil,
+                    timestamp: fileDate
                 ),
                 date: fileDate,
                 content: content
@@ -1180,7 +1197,8 @@ struct ContentView: View {
             filename: target.filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: target.fileExists ? modificationDate(for: target.fileURL) : Date()
         )
     }
 
@@ -1248,6 +1266,7 @@ struct ContentView: View {
             selectedEntryId = entry.id
             isLoadingEntry = false
             let didSave = saveEntry(entry: entry)
+            editorCaretEndRequest = UUID()
             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
             return didSave
         } else {
@@ -1733,6 +1752,7 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
+                        quickCaptureFocusRequest: quickCaptureFocusRequest,
                         editorID: selectedEntryId,
                         allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
                         focusRequest: editorFocusRequest,
@@ -2003,15 +2023,16 @@ struct ContentView: View {
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
-                                            Text(entry.previewText)
+                                            Text(historyRowTitle(for: entry))
                                                 .font(.system(size: 13))
                                                 .lineLimit(1)
-                                                .foregroundColor(.primary)
+                                                .truncationMode(.tail)
+                                                .foregroundColor(entry.previewText.isEmpty ? .secondary : .primary)
 
                                             Spacer()
                                         }
 
-                                        Text(entry.date)
+                                        Text(historyRowTimestamp(for: entry))
                                             .font(.system(size: 12))
                                             .foregroundColor(.secondary)
                                     }
@@ -2088,7 +2109,21 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showingSidebar)
         .animation(.easeInOut(duration: 0.2), value: showingDestinationSettings)
         .preferredColorScheme(colorScheme)
+        .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
+            newEntry: createNewEntry,
+            openHistory: {
+                if !showingSidebar {
+                    openHistorySidebar()
+                }
+            },
+            openDestinationSettings: {
+                if !showingDestinationSettings {
+                    openDestinationSettings()
+                }
+            }
+        ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
+        .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             showingDestinationSettings = false
@@ -2165,6 +2200,15 @@ struct ContentView: View {
         }
     }
     
+    private func historyRowTitle(for entry: HumanEntry) -> String {
+        entry.previewText.isEmpty ? "Untitled" : entry.previewText
+    }
+
+    private func historyRowTimestamp(for entry: HumanEntry) -> String {
+        guard let timestamp = entry.timestamp else { return entry.date }
+        return HistoryRowFormatting.timestamp(from: timestamp)
+    }
+
     private func backgroundColor(for entry: HumanEntry) -> Color {
         if entry.id == selectedEntryId {
             return Color.gray.opacity(0.1)  // More subtle selection highlight
@@ -2189,14 +2233,13 @@ struct ContentView: View {
         
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
             
             // Find and update the entry in the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-                entries[index].previewText = truncated
+                entries[index].previewText = HistoryRowFormatting.title(from: content)
+                if parseCanonicalEntryFilename(entry.filename) == nil {
+                    entries[index].timestamp = modificationDate(for: fileURL)
+                }
             }
         } catch {
             print("Error updating preview text: \(error)")
@@ -2214,6 +2257,7 @@ struct ContentView: View {
             return false
         }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
+
         
         do {
             text = try noteSaveState.save(text, to: fileURL)
@@ -2293,6 +2337,15 @@ struct ContentView: View {
 
         savedConfirmation = NoteSaveConfirmation.message(didSave: didSave, destinationName: activeDestinationDisplayName)
         savedConfirmationID = UUID()
+    }
+
+    private func startQuickCapture() {
+        showingSidebar = false
+        if !hasUnsavedDestinationSettingsChanges {
+            showingDestinationSettings = false
+        }
+        createNewEntry()
+        quickCaptureFocusRequest = UUID()
     }
 
     @ViewBuilder

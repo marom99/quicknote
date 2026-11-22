@@ -36,8 +36,7 @@ final class freewriteUITests: XCTestCase {
     func testTypingAfterCancelingDestinationSettings() throws {
         let app = XCUIApplication()
         app.launch()
-        app.menuButtons.firstMatch.click()
-        app.menuItems["Destination settings…"].click()
+        app.typeKey(",", modifierFlags: .command)
         let name = app.textFields["Display name"]
         name.click()
         name.typeText(" edited")

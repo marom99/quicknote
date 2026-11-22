@@ -17,6 +17,10 @@ struct NoteSaveState {
             didLoad(diskText, from: url)
             return diskText
         }
+        if let diskText = try? String(contentsOf: url, encoding: .utf8), diskText == text {
+            didLoad(text, from: url)
+            return text
+        }
         try text.write(to: url, atomically: true, encoding: .utf8)
         didLoad(text, from: url)
         return text

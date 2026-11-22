@@ -56,6 +56,21 @@ struct NoteSaveStateTests {
         #expect(try String(contentsOf: destination, encoding: .utf8) == "Capture text")
     }
 
+    @Test func identicalDiskContentKeepsModificationDate() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("note.md")
+        let modificationDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try "Ideas".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: modificationDate], ofItemAtPath: url.path)
+
+        var state = NoteSaveState()
+        #expect(try state.save("Ideas", to: url) == "Ideas")
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        #expect(attributes[.modificationDate] as? Date == modificationDate)
+    }
+
     @Test func unchangedEditorPreservesExternalEditsOnRepeatedSaves() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
