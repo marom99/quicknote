@@ -80,6 +80,7 @@ struct EditorScrollRequest: Equatable {
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
+    var focusRequest: UUID?
 
     let editorID: UUID?
     @Binding var caretEndRequest: UUID?
@@ -188,6 +189,14 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastAppliedScrollRequest = request
         }
 
+        if let focusRequest, focusRequest != context.coordinator.lastFocusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let textView = scrollView?.documentView as? NSTextView else { return }
+                QuickCaptureInputGate.resume(textView)
+            }
+        }
+
         context.coordinator.publishScrollMetrics()
     }
 
@@ -204,6 +213,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
+        var lastFocusRequest: UUID?
         var lastConfiguredEditorID: UUID?
         var lastAppliedCaretEndRequest: UUID?
 
@@ -407,6 +417,7 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var quickCaptureFocusRequest: UUID?
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
@@ -1637,6 +1648,7 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
+                        focusRequest: quickCaptureFocusRequest,
                         editorID: selectedEntryId,
                         caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
@@ -2003,6 +2015,7 @@ struct ContentView: View {
             }
         ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
+        .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             showingDestinationSettings = false
@@ -2215,6 +2228,15 @@ struct ContentView: View {
 
         savedConfirmation = NoteSaveConfirmation.message(didSave: didSave, destinationName: activeDestinationDisplayName)
         savedConfirmationID = UUID()
+    }
+
+    private func startQuickCapture() {
+        showingSidebar = false
+        if !hasUnsavedDestinationSettingsChanges {
+            showingDestinationSettings = false
+        }
+        createNewEntry()
+        quickCaptureFocusRequest = UUID()
     }
 
     @ViewBuilder

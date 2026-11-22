@@ -239,7 +239,7 @@ struct freewriteApp: App {
     }
      
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
                 .preferredColorScheme(colorSchemeString == "dark" ? .dark : .light)
         }
@@ -250,15 +250,36 @@ struct freewriteApp: App {
         .commands {
             EditorCommands()
         }
+
+        MenuBarExtra {
+            Button("Quick Capture") {
+                QuickCaptureCenter.shared.trigger()
+            }
+            .keyboardShortcut("n", modifiers: [.control, .option, .command])
+            Button("Show Window") {
+                QuickCaptureCenter.shared.showWindow()
+            }
+            Divider()
+            Button("Quit") { NSApp.terminate(nil) }
+        } label: {
+            QuickCaptureMenuLabel()
+        }
     }
 }
 
 // Add AppDelegate to handle window configuration
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var globalHotKey: GlobalHotKey?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        globalHotKey = GlobalHotKey {
+            MainActor.assumeIsolated { QuickCaptureCenter.shared.trigger() }
+        }
         WindowChrome.startObserving()
 
-        if let window = NSApplication.shared.windows.first {
+        if let window = NSApplication.shared.windows.first(where: {
+            $0.styleMask.contains(.titled) && !$0.className.contains("NSStatusBar")
+        }) {
             // Ensure window starts in windowed mode
             if window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
