@@ -259,6 +259,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
             let range = NSRange(location: (textView.string as NSString).length, length: 0)
             textView.setSelectedRange(range)
             textView.scrollRangeToVisible(range)
+            if let window = textView.window, window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+            }
             lastAppliedCaretEndRequest = request
             return true
         }
@@ -1145,6 +1148,7 @@ struct ContentView: View {
             selectedEntryId = entry.id
             isLoadingEntry = false
             let didSave = saveEntry(entry: entry)
+            editorCaretEndRequest = UUID()
             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
             return didSave
         } else {
