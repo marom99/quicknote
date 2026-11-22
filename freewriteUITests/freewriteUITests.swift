@@ -79,6 +79,35 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testNewEntryStaysSingleLineWithCompactDestinationSettings() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+
+        let frame = window.frame
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -1, dy: -1))
+        corner.press(forDuration: 0.1, thenDragTo: corner.withOffset(
+            CGVector(dx: 480 - frame.width, dy: 540 - frame.height)
+        ))
+        XCTAssertEqual(window.frame.width, 480, accuracy: 1)
+
+        let newEntry = app.buttons["New Note"]
+        let originalHeight = newEntry.frame.height
+        XCTAssertGreaterThan(originalHeight, 0)
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(app.staticTexts["Destination settings"].waitForExistence(timeout: 5))
+        let singleLine = NSPredicate { _, _ in
+            abs(newEntry.frame.height - originalHeight) < 1
+        }
+        expectation(for: singleLine, evaluatedWith: newEntry)
+        waitForExpectations(timeout: 5)
+        XCTAssertLessThanOrEqual(newEntry.frame.height, 20)
+        XCTAssertTrue(window.frame.contains(newEntry.frame))
+    }
+
+    @MainActor
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
