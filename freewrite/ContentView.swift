@@ -22,6 +22,7 @@ struct HumanEntry: Identifiable {
     var previewText: String
     var entryType: EntryType
     var videoFilename: String?
+    var timestamp: Date? = nil
 
     static func createNew() -> HumanEntry {
         let id = UUID()
@@ -40,7 +41,8 @@ struct HumanEntry: Identifiable {
             filename: "[\(id)]-[\(dateString)].md",
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
     }
 }
@@ -864,7 +866,8 @@ struct ContentView: View {
             filename: destinationFilename,
             previewText: existing.previewText,
             entryType: existing.entryType,
-            videoFilename: existing.videoFilename
+            videoFilename: existing.videoFilename,
+            timestamp: existing.timestamp
         )
         if selectedEntryId == existing.id {
             selectedEntryId = newId
@@ -908,7 +911,8 @@ struct ContentView: View {
             filename: filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: now
         )
         entries.insert(entry, at: 0)
         selectedEntryId = entry.id
@@ -1046,19 +1050,17 @@ struct ContentView: View {
 
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
+            let title = HistoryRowFormatting.title(from: content)
 
             return (
                 entry: HumanEntry(
                     id: uuid,
                     date: entryDisplayDate(from: fileDate),
                     filename: filename,
-                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : truncated,
+                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
                     entryType: hasVideo ? .video : .text,
-                    videoFilename: hasVideo ? videoFilename : nil
+                    videoFilename: hasVideo ? videoFilename : nil,
+                    timestamp: fileDate
                 ),
                 date: fileDate,
                 content: content
@@ -1080,7 +1082,8 @@ struct ContentView: View {
             filename: target.filename,
             previewText: "",
             entryType: .text,
-            videoFilename: nil
+            videoFilename: nil,
+            timestamp: target.fileExists ? modificationDate(for: target.fileURL) : Date()
         )
     }
 
@@ -1902,15 +1905,16 @@ struct ContentView: View {
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
-                                            Text(entry.previewText)
+                                            Text(historyRowTitle(for: entry))
                                                 .font(.system(size: 13))
                                                 .lineLimit(1)
-                                                .foregroundColor(.primary)
+                                                .truncationMode(.tail)
+                                                .foregroundColor(entry.previewText.isEmpty ? .secondary : .primary)
 
                                             Spacer()
                                         }
 
-                                        Text(entry.date)
+                                        Text(historyRowTimestamp(for: entry))
                                             .font(.system(size: 12))
                                             .foregroundColor(.secondary)
                                     }
@@ -2062,6 +2066,15 @@ struct ContentView: View {
         }
     }
     
+    private func historyRowTitle(for entry: HumanEntry) -> String {
+        entry.previewText.isEmpty ? "Untitled" : entry.previewText
+    }
+
+    private func historyRowTimestamp(for entry: HumanEntry) -> String {
+        guard let timestamp = entry.timestamp else { return entry.date }
+        return HistoryRowFormatting.timestamp(from: timestamp)
+    }
+
     private func backgroundColor(for entry: HumanEntry) -> Color {
         if entry.id == selectedEntryId {
             return Color.gray.opacity(0.1)  // More subtle selection highlight
@@ -2086,14 +2099,13 @@ struct ContentView: View {
         
         do {
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let preview = content
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let truncated = preview.isEmpty ? "" : (preview.count > 30 ? String(preview.prefix(30)) + "..." : preview)
             
             // Find and update the entry in the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-                entries[index].previewText = truncated
+                entries[index].previewText = HistoryRowFormatting.title(from: content)
+                if parseCanonicalEntryFilename(entry.filename) == nil {
+                    entries[index].timestamp = modificationDate(for: fileURL)
+                }
             }
         } catch {
             print("Error updating preview text: \(error)")
@@ -2111,6 +2123,7 @@ struct ContentView: View {
             return false
         }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
+
         
         do {
             text = try noteSaveState.save(text, to: fileURL)

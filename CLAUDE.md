@@ -92,9 +92,10 @@ struct HumanEntry: Identifiable {
     let id: UUID
     let date: String              // Display format: "MMM d" (e.g., "Feb 20")
     let filename: String          // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].md
-    var previewText: String       // First 30 chars or "Video Entry"
+    var previewText: String       // History title: first non-blank line (HistoryRowFormatting.title) or video transcript preview
     var entryType: EntryType      // .text or .video
     var videoFilename: String?    // Format: [UUID]-[YYYY-MM-DD-HH-mm-ss].mov
+    var timestamp: Date?          // History row time: filename timestamp (canonical) or file modification date
 }
 ```
 
@@ -112,7 +113,7 @@ struct HumanEntry: Identifiable {
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
 - Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.
-- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized.
+- **History listing**: all modes list root-level `.md` files, with non-canonical rows using a stable UUID derived from the file path. New note excludes hidden `.quicknote-capture-*.md` title drafts until they are finalized. Each row shows the note's first non-blank line as its title (empty notes read "Untitled") and the day plus time (`HistoryRowFormatting`).
 - **Destination settings** rail opens from the destination menu (`Destination settings…`); mutually exclusive with History; edits the active destination only; changes apply immediately and re-resolve the write target. Out of v1: video into rolling, subfolders in format, folder rebind.
 - `DestinationStore` owns persistence, bookmark resolve/start/stop, and active path resolution; pure helpers live in `DestinationWriteTarget.swift`; `ContentView` wires the chip/menu UI, settings rail, resolve/bind, and journal reload on switch.
 - Missing or unreadable destinations soft-fail: the name stays in the menu, History is empty, no crash.
@@ -243,8 +244,8 @@ struct VideoPlayerView: View {
 │ 📹 Video...  │ ← Video entry with thumbnail
 │ Feb 20       │
 ├──────────────┤
-│ This is a... │ ← Text entry with preview
-│ Feb 19       │
+│ Ideas for... │ ← First line as title (tail-truncated)
+│ Feb 19, 9:41 AM │ ← Day plus time
 ├──────────────┤
 │ Another ...  │
 │ Feb 18       │
@@ -333,7 +334,7 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
-`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging.
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging. Opening or leaving a History note without editing does not change its modification time. Non-canonical History rows display that time.
 
 An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
 
