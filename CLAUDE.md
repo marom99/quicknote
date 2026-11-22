@@ -173,7 +173,7 @@ The main view containing all UI and business logic.
 - `createNewEntry()` - Creates new text entry
 - `saveEntry(entry:)` - Saves text to .md file
 - `loadEntry(entry:)` - Loads text or video for display
-- `deleteEntry(entry:)` - Moves the note and associated video assets to macOS Trash via `HistoryTrash`, retaining original/resulting URLs. An eight-second “Moved to Trash” banner restores files and the History row with Undo; switching destinations clears the affordance. Undo reselects/reloads a note that was selected before deletion, including an Existing target. A sole Rolling note's empty fallback may be removed on Undo only while its tracked file attributes and empty contents are unchanged; user content and other occupants are never overwritten. Restored Title drafts are finalized directly to unique visible title filenames rather than left hidden.
+- `deleteEntry(entry:)` - Moves the note and associated video assets to macOS Trash via `HistoryTrash`, retaining original/resulting URLs. An eight-second “Moved to Trash” banner restores files and the History row with Undo; switching destinations clears the affordance. Undo reselects/reloads a note that was selected before deletion, including an Existing target. Deleting the last selected entry leaves a blank, unbound canvas in every mode without creating a replacement file. If typing recreates the target before Undo, its user content is never overwritten. Restored Title drafts are finalized directly to unique visible title filenames rather than left hidden.
 - `saveVideoEntry(from:)` - Saves recorded video and creates metadata
 
 **Important**: When modifying the `entries` array from async contexts, wrap in `DispatchQueue.main.async` to prevent collection mutation crashes.
@@ -331,6 +331,10 @@ Text is auto-saved on every change. Routing depends on editor state:
 ```
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
+
+An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
+
+If the unbound target already contains text (for example, restored from Trash), its contents are preserved and the canvas text is appended on a new line; the merged text becomes the editor contents. A read failure leaves the canvas unbound and does not overwrite the target.
 
 ## Permissions
 

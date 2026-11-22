@@ -3,6 +3,50 @@ import Testing
 @testable import freewrite
 
 struct HistoryTrashTests {
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func unboundEmptyEditLeavesTrashedTargetAvailableForUndo(mode: DestinationSaveMode) throws {
+        try withDirectory { directory in
+            let destination = SaveDestination(
+                id: UUID(), displayName: "Test", isDefault: false,
+                saveMode: mode, existingNoteFilename: "journal.md"
+            )
+            let target = try #require(DestinationWriteTarget.resolve(for: destination, documentsURL: directory))
+            try "Original".write(to: target.fileURL, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(target.fileURL)
+            defer { try? trash.restore() }
+            #expect(DestinationWriteTarget.resolveForUnboundEdit(
+                content: " \n", destination: destination, documentsURL: directory
+            ) == nil)
+            #expect(!FileManager.default.fileExists(atPath: target.fileURL.path))
+            try trash.restore()
+            #expect(try String(contentsOf: target.fileURL, encoding: .utf8) == "Original")
+        }
+    }
+
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func undoDoesNotOverwriteRecreatedUnboundEdit(mode: DestinationSaveMode) throws {
+        try withDirectory { directory in
+            let destination = SaveDestination(
+                id: UUID(), displayName: "Test", isDefault: false,
+                saveMode: mode, existingNoteFilename: "journal.md"
+            )
+            let target = try #require(DestinationWriteTarget.resolve(for: destination, documentsURL: directory))
+            try "Original".write(to: target.fileURL, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash()
+            try trash.moveToTrash(target.fileURL)
+            defer { try? trash.restore() }
+            let recreated = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+                content: "New writing", destination: destination, documentsURL: directory
+            ))
+            let content = try DestinationWriteTarget.contentForUnboundEdit("New writing", target: recreated)
+            try content.write(to: recreated.fileURL, atomically: true, encoding: .utf8)
+            #expect(throws: (any Error).self) { try trash.restore() }
+            #expect(try String(contentsOf: recreated.fileURL, encoding: .utf8) == "New writing")
+            try FileManager.default.removeItem(at: recreated.fileURL)
+        }
+    }
+
     @Test func undoFinalizesTitleDraftToVisibleUniqueFilename() throws {
         try withDirectory { directory in
             let draft = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
