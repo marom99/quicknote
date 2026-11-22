@@ -1,6 +1,31 @@
 import CryptoKit
 import Foundation
 
+final class LiveCaptureDraftRegistration {
+    private static let lock = NSLock()
+    private static var drafts: [UUID: URL] = [:]
+    private let id = UUID()
+
+    init(fileURL: URL) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts[id] = fileURL.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    deinit {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts.removeValue(forKey: id)
+    }
+
+    static func contains(_ fileURL: URL) -> Bool {
+        let normalizedURL = fileURL.resolvingSymlinksInPath().standardizedFileURL
+        lock.lock()
+        defer { lock.unlock() }
+        return drafts.values.contains(normalizedURL)
+    }
+}
+
 /// Pure helpers for resolving per-destination write targets (rolling / existing modes).
 enum DestinationWriteTarget {
     struct ResolvedTarget: Equatable {
@@ -148,6 +173,45 @@ enum DestinationWriteTarget {
 
     static func captureDraftFilename(captureId: UUID) -> String {
         "\(captureDraftPrefix)\(captureId.uuidString).md"
+    }
+
+    @discardableResult
+    static func recoverOrphanedCaptureDrafts(
+        in documentsURL: URL,
+        excluding liveDraftFilename: String? = nil,
+        fileManager: FileManager = .default
+    ) throws -> [URL] {
+        let files = try fileManager.contentsOfDirectory(
+            at: documentsURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .creationDateKey, .contentModificationDateKey]
+        )
+        var failedDrafts: [URL] = []
+        for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard isCaptureDraftFilename(file.lastPathComponent),
+                  file.lastPathComponent != liveDraftFilename,
+                  !LiveCaptureDraftRegistration.contains(file) else { continue }
+            do {
+                let values = try file.resourceValues(forKeys: [.isRegularFileKey, .creationDateKey, .contentModificationDateKey])
+                guard values.isRegularFile == true else { continue }
+                let content = try String(contentsOf: file, encoding: .utf8)
+                if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try fileManager.removeItem(at: file)
+                    continue
+                }
+                let fallbackDate = values.creationDate ?? values.contentModificationDate ?? Date()
+                let basename = sanitizedTitleBasename(from: content) ?? dateCaptureBasename(now: fallbackDate)
+                let filename = uniqueMarkdownFilename(
+                    preferredBasename: basename,
+                    documentsURL: documentsURL,
+                    fileManager: fileManager,
+                    excluding: file.lastPathComponent
+                )
+                try fileManager.moveItem(at: file, to: documentsURL.appendingPathComponent(filename))
+            } catch {
+                failedDrafts.append(file)
+            }
+        }
+        return failedDrafts
     }
 
     static func uniqueMarkdownFilename(
