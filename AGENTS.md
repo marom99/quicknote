@@ -108,7 +108,7 @@ struct HumanEntry: Identifiable {
 - The default Freewrite folder uses no bookmark; user-picked folders persist bookmark `Data` in UserDefaults (`saveDestinations`, `activeDestinationId`).
 - **Per-destination save modes** (persisted on each `SaveDestination`; legacy decoded destinations default to **New note**):
   - **New note**: capture-per-session. Launch and destination reload show an unbound empty canvas; the first non-whitespace edit starts a capture. Each destination chooses a `newNoteFilenameFormat` of **Date** (`yyyy-MM-dd-HH-mm-ss.md`) or **Title** (first paragraph when the capture closes).
-  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Entry; New Entry appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
+  - **Rolling**: period (daily / weekly / monthly) + `filenameFormat` DateFormatter pattern (basename only, no subfolders) → e.g. `yyyy-MM-dd.md`. Period uses an ISO-week-aware anchor for weekly; bind on launch / switch / New Note; New Note appends `\n---\nyyyy-MM-dd HH:mm\n` and moves the caret to the end so the next session starts below the separator.
   - **Existing**: bind to a chosen root-level `.md` (`existingNoteFilename`); create-on-pick; soft-fail (empty editor) if missing later.
 - Switching destinations reloads History and scopes autosave to that folder only; video assets live under each destination's `Videos/` subdirectory.
 - Adding a destination creates it inactive, then uses the normal destination-switch path. This ordering is required so an active capture finalizes in its original folder before the new destination becomes active.
@@ -120,8 +120,9 @@ struct HumanEntry: Identifiable {
 **New note capture lifecycle**:
 - A capture starts only when the blank, unbound canvas receives non-whitespace text. Date captures autosave directly to their final timestamp filename; Title captures autosave to a hidden `.quicknote-capture-[UUID].md` draft.
 - Selecting a saved History entry binds the editor to that file. Subsequent edits, including clearing all text, must save that selected file and must not start a new capture.
-- A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Entry, closing the window, or terminating the app.
+- A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Note, closing the window, or terminating the app.
 - Empty live captures are deleted. A nonempty Title capture is renamed from its hidden draft to a sanitized first-paragraph filename (80 characters maximum), with a timestamp fallback and `-2`, `-3`, etc. collision suffixes.
+- Journal loading recovers orphaned title drafts (for example after Force Quit) into normal History files using the same title rules and deletes whitespace-only orphans. A process-wide, destination-path-scoped registry protects live drafts in every window until finalization, discard, or view teardown; unreadable drafts remain on disk for a later retry.
 - Finalization must run while the capture's destination is still active because autosave, draft cleanup, and title renaming all resolve against the active destination directory.
 
 **Location** (active destination root):
@@ -264,7 +265,7 @@ struct VideoPlayerView: View {
 - **Chat**: Opens AI chat menu (ChatGPT/Claude integration)
 - **Backspace Toggle**: Enable/disable backspace key
 - **Fullscreen**: Toggle fullscreen mode
-- **New Entry**: Finalizes the active New note capture and returns to a blank canvas; Rolling / Existing append a timestamped session separator
+- **New Note**: Finalizes the active New note capture and returns to a blank canvas; Rolling / Existing append a timestamped session separator. A successful nonempty finalization or separator write shows “Saved to <destination name>” above the bottom nav for about two seconds, then fades. Empty canvases and failed writes show no confirmation. The label uses the nav’s muted 13px styling without extra chrome; write/rename success propagates to the confirmation decision.
 - **Theme Toggle**: 🌙/☀️ for dark/light mode
 - **History**: 🕐 Shows/hides sidebar
 
@@ -331,6 +332,8 @@ Text is auto-saved on every change. Routing depends on editor state:
 ```
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
+
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging.
 
 An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
 
