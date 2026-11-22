@@ -39,7 +39,7 @@ struct EditorCaretTests {
 
         let separator = DestinationWriteTarget.sessionSeparator()
         configure(coordinator, textView, text: box.value + separator, editorID: entryId)
-        coordinator.placeCaretAtEnd()
+        coordinator.applyCaretEndRequest(UUID())
         textView.insertText("SESSION TWO", replacementRange: textView.selectedRange())
 
         #expect(box.value == "SESSION ONE" + separator + "SESSION TWO")
