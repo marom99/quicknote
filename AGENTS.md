@@ -332,6 +332,12 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging.
+
+An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
+
+If the unbound target already contains text (for example, restored from Trash), its contents are preserved and the canvas text is appended on a new line; the merged text becomes the editor contents. A read failure leaves the canvas unbound and does not overwrite the target.
+
 ## Permissions
 
 Required entitlements in `freewrite.entitlements`:

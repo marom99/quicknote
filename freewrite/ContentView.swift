@@ -80,6 +80,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var scrollRequest: EditorScrollRequest?
 
     let editorID: UUID?
+    @Binding var caretEndRequest: UUID?
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -171,6 +172,15 @@ struct FreewriteTextEditor: NSViewRepresentable {
             )
         }
 
+        if context.coordinator.applyCaretEndRequest(caretEndRequest) {
+            let appliedRequest = caretEndRequest
+            DispatchQueue.main.async {
+                if caretEndRequest == appliedRequest {
+                    caretEndRequest = nil
+                }
+            }
+        }
+
         if let request = scrollRequest, request != context.coordinator.lastAppliedScrollRequest {
             context.coordinator.scrollTo(fraction: request.fraction)
             context.coordinator.lastAppliedScrollRequest = request
@@ -193,6 +203,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
         var lastConfiguredEditorID: UUID?
+        var lastAppliedCaretEndRequest: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
@@ -240,6 +251,16 @@ struct FreewriteTextEditor: NSViewRepresentable {
             textView.selectedRanges = selectedRanges
             isUpdatingText = false
             lastConfiguredEditorID = editorID
+        }
+
+        @discardableResult
+        func applyCaretEndRequest(_ request: UUID?) -> Bool {
+            guard let request, request != lastAppliedCaretEndRequest, let textView else { return false }
+            let range = NSRange(location: (textView.string as NSString).length, length: 0)
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+            lastAppliedCaretEndRequest = request
+            return true
         }
 
         func startObservingBoundsChanges() {
@@ -381,8 +402,10 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
+    @State private var noteSaveState = NoteSaveState()
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var showingDestinationSettings = false
@@ -777,8 +800,13 @@ struct ContentView: View {
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(filename)
         if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                return
+            }
         }
+        noteSaveState.forget(fileURL)
     }
 
     private func removeEntry(withFilename filename: String) {
@@ -799,11 +827,18 @@ struct ContentView: View {
         guard fileManager.fileExists(atPath: sourceURL.path) else { return false }
 
         if fileManager.fileExists(atPath: destinationURL.path) {
-            try? fileManager.removeItem(at: destinationURL)
+            do {
+                try fileManager.removeItem(at: destinationURL)
+                noteSaveState.forget(destinationURL)
+            } catch {
+                return false
+            }
         }
 
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            noteSaveState.forget(sourceURL)
+            noteSaveState.forget(destinationURL)
             return true
         } catch {
             print("Error renaming capture file: \(error)")
@@ -1074,8 +1109,7 @@ struct ContentView: View {
             return !appendSeparator
         }
 
-        // Missing path: stay unbound so typing cannot silently recreate the file
-        // (Existing soft-fail, or Rolling create failure). Settings keep the path.
+        // Missing paths stay unbound until a nonempty edit resolves the target.
         guard target.fileExists else {
             selectedEntryId = nil
             currentVideoURL = nil
@@ -1575,6 +1609,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
+                        caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
@@ -1957,6 +1992,32 @@ struct ContentView: View {
                let currentEntry = entries.first(where: { $0.id == currentId }),
                currentEntry.entryType == .text {
                 saveEntry(entry: currentEntry)
+            } else if selectedEntryId == nil,
+                      let destination = destinationStore.activeDestination,
+                      let documentsDirectory = getDocumentsDirectory(),
+                      let target = DestinationWriteTarget.resolveForUnboundEdit(
+                        content: text,
+                        destination: destination,
+                        documentsURL: documentsDirectory
+                      ) {
+                let mergedText: String
+                do {
+                    mergedText = try DestinationWriteTarget.contentForUnboundEdit(text, target: target)
+                } catch {
+                    print("Error reading unbound write target: \(error)")
+                    return
+                }
+                if mergedText != text {
+                    text = mergedText
+                    editorCaretEndRequest = UUID()
+                }
+                let entry = entryForResolvedTarget(target)
+                if !entries.contains(where: { $0.id == entry.id }) {
+                    entries.insert(entry, at: 0)
+                }
+                noteSaveState.forget(target.fileURL)
+                selectedEntryId = entry.id
+                saveEntry(entry: entry)
             }
         }
         .confirmationDialog(
@@ -2026,7 +2087,7 @@ struct ContentView: View {
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            text = try noteSaveState.save(text, to: fileURL)
             print("Successfully saved entry: \(entry.filename)")
             if updatePreview {
                 updatePreviewText(for: entry)
@@ -2068,6 +2129,7 @@ struct ContentView: View {
                     let rawText = try String(contentsOf: fileURL, encoding: .utf8)
                     // Strip legacy leading newlines from older entries
                     text = String(rawText.drop(while: { $0 == "\n" }))
+                    noteSaveState.didLoad(text, from: fileURL)
                     print("Successfully loaded entry: \(entry.filename)")
                 } else {
                     // Soft-fail missing file (e.g. Existing note removed from disk).
@@ -2404,6 +2466,7 @@ struct ContentView: View {
 
         do {
             try fileManager.removeItem(at: fileURL)
+            noteSaveState.forget(fileURL)
             print("Successfully deleted file: \(entry.filename)")
 
             // If this is a video entry, also delete the video file
@@ -2421,10 +2484,8 @@ struct ContentView: View {
                     if let firstEntry = entries.first {
                         selectedEntryId = firstEntry.id
                         loadEntry(entry: firstEntry)
-                    } else if isCapturePerSessionMode {
-                        beginFreshCaptureSession(clearText: true)
                     } else {
-                        createNewEntry()
+                        beginFreshCaptureSession(clearText: true)
                     }
                 }
             }
