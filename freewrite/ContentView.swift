@@ -403,6 +403,7 @@ struct ContentView: View {
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
+    @State private var noteSaveState = NoteSaveState()
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var showingDestinationSettings = false
@@ -797,8 +798,13 @@ struct ContentView: View {
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(filename)
         if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                return
+            }
         }
+        noteSaveState.forget(fileURL)
     }
 
     private func removeEntry(withFilename filename: String) {
@@ -818,11 +824,18 @@ struct ContentView: View {
         guard fileManager.fileExists(atPath: sourceURL.path) else { return }
 
         if fileManager.fileExists(atPath: destinationURL.path) {
-            try? fileManager.removeItem(at: destinationURL)
+            do {
+                try fileManager.removeItem(at: destinationURL)
+                noteSaveState.forget(destinationURL)
+            } catch {
+                return
+            }
         }
 
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            noteSaveState.forget(sourceURL)
+            noteSaveState.forget(destinationURL)
         } catch {
             print("Error renaming capture file: \(error)")
         }
@@ -1964,6 +1977,7 @@ struct ContentView: View {
                 if !entries.contains(where: { $0.id == entry.id }) {
                     entries.insert(entry, at: 0)
                 }
+                noteSaveState.forget(target.fileURL)
                 selectedEntryId = entry.id
                 saveEntry(entry: entry)
             }
@@ -2034,7 +2048,7 @@ struct ContentView: View {
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
         
         do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            text = try noteSaveState.save(text, to: fileURL)
             print("Successfully saved entry: \(entry.filename)")
             if updatePreview {
                 updatePreviewText(for: entry)
@@ -2074,6 +2088,7 @@ struct ContentView: View {
                     let rawText = try String(contentsOf: fileURL, encoding: .utf8)
                     // Strip legacy leading newlines from older entries
                     text = String(rawText.drop(while: { $0 == "\n" }))
+                    noteSaveState.didLoad(text, from: fileURL)
                     print("Successfully loaded entry: \(entry.filename)")
                 } else {
                     // Soft-fail missing file (e.g. Existing note removed from disk).
@@ -2404,6 +2419,7 @@ struct ContentView: View {
 
         do {
             try fileManager.removeItem(at: fileURL)
+            noteSaveState.forget(fileURL)
             print("Successfully deleted file: \(entry.filename)")
 
             // If this is a video entry, also delete the video file
