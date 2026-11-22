@@ -3,6 +3,25 @@ import Testing
 @testable import freewrite
 
 struct NoteSaveStateTests {
+    @Test func unboundExistingEditRecreatesTargetWithPreviouslySavedText() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("existing.md")
+        let destination = SaveDestination(id: UUID(), displayName: "Test", isDefault: false,
+                                          saveMode: .existing, existingNoteFilename: "existing.md")
+        var state = NoteSaveState()
+        _ = try state.save("Local text", to: url)
+        try FileManager.default.removeItem(at: url)
+        let target = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "Local text", destination: destination, documentsURL: directory
+        ))
+        let content = try DestinationWriteTarget.contentForUnboundEdit("Local text", target: target)
+        state.forget(target.fileURL)
+        _ = try state.save(content, to: target.fileURL)
+        #expect(try String(contentsOf: url, encoding: .utf8) == "Local text")
+    }
+
     @Test func deletedDateCaptureCanRestoreIdenticalTextAtSameTimestamp() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
