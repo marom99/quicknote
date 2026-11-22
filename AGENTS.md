@@ -335,6 +335,10 @@ The selected-entry check must precede starting a capture so historical edits—i
 
 `saveEntry` skips the write when the file already holds exactly the editor text, or when file and editor are still exactly as `loadEntry` left them (`LoadedTextBaseline`, which covers legacy notes whose leading newlines were stripped on load), so selecting or leaving a note in History without editing it never changes its modification time, which non-canonical History rows display.
 
+An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
+
+If the unbound target already contains text (for example, restored from Trash), its contents are preserved and the canvas text is appended on a new line; the merged text becomes the editor contents. A read failure leaves the canvas unbound and does not overwrite the target.
+
 ## Permissions
 
 Required entitlements in `freewrite.entitlements`:

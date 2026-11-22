@@ -225,6 +225,24 @@ enum DestinationWriteTarget {
 
     // MARK: - Resolve write target
 
+    static func contentForUnboundEdit(_ content: String, target: ResolvedTarget) throws -> String {
+        let existing = try String(contentsOf: target.fileURL, encoding: .utf8)
+        guard !existing.isEmpty else { return content }
+        return existing + (existing.hasSuffix("\n") ? "" : "\n") + content
+    }
+
+    static func resolveForUnboundEdit(
+        content: String,
+        destination: SaveDestination,
+        documentsURL: URL,
+        now: Date = Date()
+    ) -> ResolvedTarget? {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let target = resolve(for: destination, documentsURL: documentsURL, now: now),
+              target.fileExists else { return nil }
+        return target
+    }
+
     /// Resolves the file the editor should bind to for Rolling / Existing modes.
     /// Creates the file when missing (except Existing soft-fail when no filename is configured).
     static func resolve(
@@ -282,7 +300,9 @@ enum DestinationWriteTarget {
         let fileURL = documentsURL.appendingPathComponent(filename)
         let pathKey = fileURL.standardizedFileURL.path
         let entryId = stableUUID(fromPath: pathKey)
-        let exists = fileManager.fileExists(atPath: fileURL.path)
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+        guard !isDirectory.boolValue else { return nil }
         var didCreate = false
 
         if !exists && createIfMissing {

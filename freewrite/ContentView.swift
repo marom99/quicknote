@@ -82,6 +82,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var scrollRequest: EditorScrollRequest?
 
     let editorID: UUID?
+    @Binding var caretEndRequest: UUID?
     let selectedFont: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
@@ -173,6 +174,15 @@ struct FreewriteTextEditor: NSViewRepresentable {
             )
         }
 
+        if context.coordinator.applyCaretEndRequest(caretEndRequest) {
+            let appliedRequest = caretEndRequest
+            DispatchQueue.main.async {
+                if caretEndRequest == appliedRequest {
+                    caretEndRequest = nil
+                }
+            }
+        }
+
         if let request = scrollRequest, request != context.coordinator.lastAppliedScrollRequest {
             context.coordinator.scrollTo(fraction: request.fraction)
             context.coordinator.lastAppliedScrollRequest = request
@@ -195,6 +205,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
         var lastConfiguredEditorID: UUID?
+        var lastAppliedCaretEndRequest: UUID?
 
         init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
@@ -242,6 +253,16 @@ struct FreewriteTextEditor: NSViewRepresentable {
             textView.selectedRanges = selectedRanges
             isUpdatingText = false
             lastConfiguredEditorID = editorID
+        }
+
+        @discardableResult
+        func applyCaretEndRequest(_ request: UUID?) -> Bool {
+            guard let request, request != lastAppliedCaretEndRequest, let textView else { return false }
+            let range = NSRange(location: (textView.string as NSString).length, length: 0)
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+            lastAppliedCaretEndRequest = request
+            return true
         }
 
         func startObservingBoundsChanges() {
@@ -381,6 +402,7 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
+    @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var loadedTextBaseline: LoadedTextBaseline? = nil
@@ -1067,8 +1089,7 @@ struct ContentView: View {
             return true
         }
 
-        // Missing path: stay unbound so typing cannot silently recreate the file
-        // (Existing soft-fail, or Rolling create failure). Settings keep the path.
+        // Missing paths stay unbound until a nonempty edit resolves the target.
         guard target.fileExists else {
             selectedEntryId = nil
             currentVideoURL = nil
@@ -1566,6 +1587,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         editorID: selectedEntryId,
+                        caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
                         fontSize: fontSize,
                         lineSpacing: lineHeight,
@@ -1924,6 +1946,31 @@ struct ContentView: View {
                let currentEntry = entries.first(where: { $0.id == currentId }),
                currentEntry.entryType == .text {
                 saveEntry(entry: currentEntry)
+            } else if selectedEntryId == nil,
+                      let destination = destinationStore.activeDestination,
+                      let documentsDirectory = getDocumentsDirectory(),
+                      let target = DestinationWriteTarget.resolveForUnboundEdit(
+                        content: text,
+                        destination: destination,
+                        documentsURL: documentsDirectory
+                      ) {
+                let mergedText: String
+                do {
+                    mergedText = try DestinationWriteTarget.contentForUnboundEdit(text, target: target)
+                } catch {
+                    print("Error reading unbound write target: \(error)")
+                    return
+                }
+                if mergedText != text {
+                    text = mergedText
+                    editorCaretEndRequest = UUID()
+                }
+                let entry = entryForResolvedTarget(target)
+                if !entries.contains(where: { $0.id == entry.id }) {
+                    entries.insert(entry, at: 0)
+                }
+                selectedEntryId = entry.id
+                saveEntry(entry: entry)
             }
         }
         .confirmationDialog(
@@ -2399,10 +2446,8 @@ struct ContentView: View {
                     if let firstEntry = entries.first {
                         selectedEntryId = firstEntry.id
                         loadEntry(entry: firstEntry)
-                    } else if isCapturePerSessionMode {
-                        beginFreshCaptureSession(clearText: true)
                     } else {
-                        createNewEntry()
+                        beginFreshCaptureSession(clearText: true)
                     }
                 }
             }
