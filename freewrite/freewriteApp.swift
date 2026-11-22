@@ -247,6 +247,9 @@ struct freewriteApp: App {
         // Default is a comfortable note size; min allows Age-like compact windows.
         .defaultSize(width: 360, height: 540)
         .windowResizability(.contentMinSize)
+        .commands {
+            EditorCommands()
+        }
     }
 }
 
