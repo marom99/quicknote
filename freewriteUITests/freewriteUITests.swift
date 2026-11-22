@@ -23,6 +23,37 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let seed = "theme focus seed \(UUID().uuidString.prefix(8).lowercased())"
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.click()
+        editor.typeText(seed)
+        app.buttons["New Note"].click()
+
+        app.buttons["themeToggleButton"].click()
+        XCTAssertTrue(hasKeyboardFocus(app.textViews.firstMatch), "Editor lost focus after theme toggle")
+
+        app.buttons["historyButton"].click()
+        let row = app.staticTexts[seed]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.click()
+        XCTAssertTrue(hasKeyboardFocus(app.textViews.firstMatch), "Editor lost focus after selecting a History note")
+
+        app.typeText("ZZ")
+
+        let value = app.textViews.firstMatch.value as? String ?? ""
+        XCTAssertTrue(value.contains("ZZ"), "Typed text was dropped; editor holds: \(value)")
+    }
+
+    private func hasKeyboardFocus(_ element: XCUIElement) -> Bool {
+        element.value(forKey: "hasKeyboardFocus") as? Bool ?? false
+    }
+
+    @MainActor
     func testNewEntryStaysSingleLineWithCompactDestinationSettings() throws {
         let app = XCUIApplication()
         app.launch()
@@ -37,11 +68,10 @@ final class freewriteUITests: XCTestCase {
         ))
         XCTAssertEqual(window.frame.width, 480, accuracy: 1)
 
-        let newEntry = app.buttons["New Entry"]
+        let newEntry = app.buttons["New Note"]
         let originalHeight = newEntry.frame.height
         XCTAssertGreaterThan(originalHeight, 0)
-        app.menuButtons.firstMatch.click()
-        app.menuItems["Destination settings…"].click()
+        app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.staticTexts["Destination settings"].waitForExistence(timeout: 5))
         let singleLine = NSPredicate { _, _ in
             abs(newEntry.frame.height - originalHeight) < 1

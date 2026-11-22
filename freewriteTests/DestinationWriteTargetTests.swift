@@ -1,8 +1,221 @@
 import Foundation
+import AppKit
+import SwiftUI
 import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test func recoveryProtectsAllWindowsLiveDraftsUntilRegistrationEnds() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let otherDirectory = directory.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let filename = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let live = directory.appendingPathComponent(filename)
+        let emptyLive = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        let other = otherDirectory.appendingPathComponent(filename)
+        try "Window A title".write(to: live, atomically: true, encoding: .utf8)
+        try " \n".write(to: emptyLive, atomically: true, encoding: .utf8)
+        try "Other destination title".write(to: other, atomically: true, encoding: .utf8)
+        var registrations = [
+            LiveCaptureDraftRegistration(fileURL: live),
+            LiveCaptureDraftRegistration(fileURL: emptyLive)
+        ]
+        #expect(registrations.count == 2)
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: live, encoding: .utf8) == "Window A title")
+        #expect(try String(contentsOf: emptyLive, encoding: .utf8) == " \n")
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: otherDirectory).isEmpty)
+        #expect(try String(contentsOf: otherDirectory.appendingPathComponent("Other destination title.md"), encoding: .utf8) == "Other destination title")
+        registrations.removeAll()
+        #expect(!LiveCaptureDraftRegistration.contains(live))
+        #expect(!LiveCaptureDraftRegistration.contains(emptyLive))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Window A title.md"), encoding: .utf8) == "Window A title")
+        #expect(!FileManager.default.fileExists(atPath: emptyLive.path))
+    }
+
+    @Test(arguments: ["Live title", " \n\t"])
+    func recoversOrphanDraftsWithoutTouchingLiveDraftOrOtherFiles(liveContent: String) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let live = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let orphan = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let empty = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let fixtures = [live: liveContent, orphan: "Recovered: title / test\n\nBody", empty: " \n\t", "ordinary.md": "Unchanged"]
+        for (filename, content) in fixtures {
+            try content.write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live)
+        #expect(failures.isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Recovered title  test.md"), encoding: .utf8) == fixtures[orphan])
+        #expect(try String(contentsOf: directory.appendingPathComponent(live), encoding: .utf8) == fixtures[live])
+        #expect(try String(contentsOf: directory.appendingPathComponent("ordinary.md"), encoding: .utf8) == "Unchanged")
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(orphan).path))
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(empty).path))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live).isEmpty)
+    }
+
+    @Test func recoveryUsesCollisionSuffixesAndTimestampFallbackAndPreservesUnreadableDrafts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for filename in ["Title.md", "Title-2.md"] {
+            try "Existing".write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        for content in ["Title", "///:?"] {
+            try content.write(to: directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID())), atomically: true, encoding: .utf8)
+        }
+        let invalid = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        try Data([0xff]).write(to: invalid)
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory)
+        #expect(failures.map { $0.resolvingSymlinksInPath() } == [invalid.resolvingSymlinksInPath()])
+        #expect(try Data(contentsOf: invalid) == Data([0xff]))
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title-3.md"), encoding: .utf8) == "Title")
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let fallback = try #require(files.first { $0.lastPathComponent.range(of: #"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md$"#, options: .regularExpression) != nil })
+        #expect(try String(contentsOf: fallback, encoding: .utf8) == "///:?")
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title.md"), encoding: .utf8) == "Existing")
+    }
+
+    @Test func recoveryHandlesEmptyAndMissingDirectories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(throws: (any Error).self) {
+            try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory.appendingPathComponent("missing"))
+        }
+    }
+
+    @Test @MainActor func mergedEditCaretRequestMovesToEndOnlyOnce() {
+        let coordinator = FreewriteTextEditor.Coordinator(text: .constant(""), onScrollMetricsChange: { _ in })
+        let textView = NSTextView()
+        coordinator.textView = textView
+        textView.string = "Restored note\nTyped text 📝"
+        textView.setSelectedRange(NSRange(location: 1, length: 0))
+        #expect(!coordinator.applyCaretEndRequest(nil))
+        #expect(textView.selectedRange().location == 1)
+        let request = UUID()
+        #expect(coordinator.applyCaretEndRequest(request))
+        #expect(textView.selectedRange() == NSRange(location: (textView.string as NSString).length, length: 0))
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        #expect(!coordinator.applyCaretEndRequest(request))
+        #expect(textView.selectedRange().location == 2)
+        textView.string = ""
+        coordinator.applyCaretEndRequest(UUID())
+        #expect(textView.selectedRange() == NSRange(location: 0, length: 0))
+    }
+
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func directoryAtTargetPathIsRejected(mode: DestinationSaveMode) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: mode, existingNoteFilename: "journal.md"
+        )
+        let now = Date()
+        let target = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now, createIfMissing: false
+        ))
+        try FileManager.default.createDirectory(at: target.fileURL, withIntermediateDirectories: false)
+        let child = target.fileURL.appendingPathComponent("keep.txt")
+        try "keep".write(to: child, atomically: true, encoding: .utf8)
+        for createIfMissing in [true, false] {
+            #expect(DestinationWriteTarget.resolve(
+                for: destination, documentsURL: directory, now: now, createIfMissing: createIfMissing
+            ) == nil)
+        }
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: destination, documentsURL: directory, now: now
+        ) == nil)
+        #expect(try String(contentsOf: child, encoding: .utf8) == "keep")
+    }
+
+    @Test func unboundEditPreservesRestoredContent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: .existing, existingNoteFilename: "journal.md"
+        )
+        let target = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "new text", destination: destination, documentsURL: directory
+        ))
+        #expect(try DestinationWriteTarget.contentForUnboundEdit("new text", target: target) == "new text")
+        for restored in ["restored text", "restored text\n", " \n"] {
+            try restored.write(to: target.fileURL, atomically: true, encoding: .utf8)
+            let merged = try DestinationWriteTarget.contentForUnboundEdit("new text", target: target)
+            #expect(merged == restored + (restored.hasSuffix("\n") ? "" : "\n") + "new text")
+            #expect(try String(contentsOf: target.fileURL, encoding: .utf8) == restored)
+        }
+        try FileManager.default.removeItem(at: target.fileURL)
+        #expect(throws: (any Error).self) {
+            try DestinationWriteTarget.contentForUnboundEdit("new text", target: target)
+        }
+    }
+
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func unboundEditRecreatesDeletedTarget(mode: DestinationSaveMode) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: mode, existingNoteFilename: "journal.md"
+        )
+        let now = Date()
+        let original = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now
+        ))
+        try "old note".write(to: original.fileURL, atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: original.fileURL)
+
+        for content in ["", " \n\t"] {
+            #expect(DestinationWriteTarget.resolveForUnboundEdit(
+                content: content, destination: destination, documentsURL: directory, now: now
+            ) == nil)
+            #expect(!FileManager.default.fileExists(atPath: original.fileURL.path))
+        }
+        let recreated = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "new note", destination: destination, documentsURL: directory, now: now
+        ))
+        #expect(recreated.filename == original.filename)
+        #expect(recreated.entryId == original.entryId)
+        #expect(recreated.didCreate)
+        try "new note".write(to: recreated.fileURL, atomically: true, encoding: .utf8)
+        let again = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "more text", destination: destination, documentsURL: directory, now: now
+        ))
+        #expect(!again.didCreate)
+        #expect(try String(contentsOf: again.fileURL, encoding: .utf8) == "new note")
+    }
+
+    @Test func unboundEditRejectsInvalidAndUnavailableTargets() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: .existing, existingNoteFilename: "journal.md"
+        )
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: destination, documentsURL: directory
+        ) == nil)
+        var invalid = destination
+        for filename in [nil, "../journal.md"] as [String?] {
+            invalid.existingNoteFilename = filename
+            #expect(DestinationWriteTarget.resolveForUnboundEdit(
+                content: "text", destination: invalid, documentsURL: directory
+            ) == nil)
+        }
+        #expect(DestinationWriteTarget.resolveForUnboundEdit(
+            content: "text", destination: .makeDefault(), documentsURL: directory
+        ) == nil)
+    }
+
     @Test func dailyAnchorIsStartOfDay() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
