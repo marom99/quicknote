@@ -428,6 +428,7 @@ struct ContentView: View {
     @State private var pendingDestinationSettingsCloseAction: DestinationSettingsCloseAction? = nil
     @State private var showingDiscardDestinationSettingsConfirmation = false
     @State private var inProgressCaptureFilename: String? = nil
+    @State private var liveCaptureDraftRegistration: LiveCaptureDraftRegistration?
     @State private var captureStartedAt: Date? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
@@ -782,6 +783,7 @@ struct ContentView: View {
     }
 
     private func beginFreshCaptureSession(clearText: Bool) {
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -890,6 +892,9 @@ struct ContentView: View {
             )
         case .title:
             filename = DestinationWriteTarget.captureDraftFilename(captureId: captureId)
+            liveCaptureDraftRegistration = LiveCaptureDraftRegistration(
+                fileURL: documentsDirectory.appendingPathComponent(filename)
+            )
         }
 
         inProgressCaptureFilename = filename
@@ -916,6 +921,7 @@ struct ContentView: View {
             if let filename = inProgressCaptureFilename {
                 deleteCaptureFileIfExists(filename)
                 removeEntry(withFilename: filename)
+                liveCaptureDraftRegistration = nil
                 inProgressCaptureFilename = nil
                 captureStartedAt = nil
             }
@@ -985,6 +991,7 @@ struct ContentView: View {
             }
         }
 
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -1367,6 +1374,7 @@ struct ContentView: View {
         selectedVideoHasTranscript = false
         didCopyTranscript = false
         thumbnailMemoryCache.removeAllObjects()
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         text = ""
@@ -1446,6 +1454,14 @@ struct ContentView: View {
         }
         
         do {
+            let failedDrafts = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(
+                in: documentsDirectory,
+                excluding: inProgressCaptureFilename,
+                fileManager: fileManager
+            )
+            for draft in failedDrafts {
+                print("Could not recover capture draft: \(draft.lastPathComponent)")
+            }
             let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
             let mdFiles = fileURLs.filter {
                 $0.pathExtension == "md"
@@ -1475,7 +1491,11 @@ struct ContentView: View {
             print("Successfully loaded and sorted \(loadedEntries.count) entries")
 
             // Now assign to the state variable
+            let liveEntry = entries.first { $0.filename == inProgressCaptureFilename }
             entries = loadedEntries
+            if let liveEntry, !entries.contains(where: { $0.filename == liveEntry.filename }) {
+                entries.insert(liveEntry, at: 0)
+            }
 
             // Rolling / Existing: bind to resolved write target (skip new-note launch rules).
             if activeSaveMode == .rolling || activeSaveMode == .existing {
@@ -1484,14 +1504,16 @@ struct ContentView: View {
             }
 
             // New note: load history, start with a fresh empty capture session.
-            beginFreshCaptureSession(clearText: true)
+            if inProgressCaptureFilename == nil {
+                beginFreshCaptureSession(clearText: true)
+            }
             
         } catch {
             print("Error loading directory contents: \(error)")
             print("Creating default entry after error")
             if activeSaveMode == .rolling || activeSaveMode == .existing {
                 _ = bindToResolvedWriteTarget(appendSeparator: false)
-            } else {
+            } else if inProgressCaptureFilename == nil {
                 beginFreshCaptureSession(clearText: true)
             }
         }
