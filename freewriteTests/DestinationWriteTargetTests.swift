@@ -5,6 +5,36 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test func recoveryProtectsAllWindowsLiveDraftsUntilRegistrationEnds() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let otherDirectory = directory.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let filename = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let live = directory.appendingPathComponent(filename)
+        let emptyLive = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        let other = otherDirectory.appendingPathComponent(filename)
+        try "Window A title".write(to: live, atomically: true, encoding: .utf8)
+        try " \n".write(to: emptyLive, atomically: true, encoding: .utf8)
+        try "Other destination title".write(to: other, atomically: true, encoding: .utf8)
+        var registrations = [
+            LiveCaptureDraftRegistration(fileURL: live),
+            LiveCaptureDraftRegistration(fileURL: emptyLive)
+        ]
+        #expect(registrations.count == 2)
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: live, encoding: .utf8) == "Window A title")
+        #expect(try String(contentsOf: emptyLive, encoding: .utf8) == " \n")
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: otherDirectory).isEmpty)
+        #expect(try String(contentsOf: otherDirectory.appendingPathComponent("Other destination title.md"), encoding: .utf8) == "Other destination title")
+        registrations.removeAll()
+        #expect(!LiveCaptureDraftRegistration.contains(live))
+        #expect(!LiveCaptureDraftRegistration.contains(emptyLive))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Window A title.md"), encoding: .utf8) == "Window A title")
+        #expect(!FileManager.default.fileExists(atPath: emptyLive.path))
+    }
+
     @Test(arguments: ["Live title", " \n\t"])
     func recoversOrphanDraftsWithoutTouchingLiveDraftOrOtherFiles(liveContent: String) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

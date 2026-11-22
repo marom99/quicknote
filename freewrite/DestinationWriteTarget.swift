@@ -1,6 +1,31 @@
 import CryptoKit
 import Foundation
 
+final class LiveCaptureDraftRegistration {
+    private static let lock = NSLock()
+    private static var drafts: [UUID: URL] = [:]
+    private let id = UUID()
+
+    init(fileURL: URL) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts[id] = fileURL.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    deinit {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        Self.drafts.removeValue(forKey: id)
+    }
+
+    static func contains(_ fileURL: URL) -> Bool {
+        let normalizedURL = fileURL.resolvingSymlinksInPath().standardizedFileURL
+        lock.lock()
+        defer { lock.unlock() }
+        return drafts.values.contains(normalizedURL)
+    }
+}
+
 /// Pure helpers for resolving per-destination write targets (rolling / existing modes).
 enum DestinationWriteTarget {
     struct ResolvedTarget: Equatable {
@@ -163,7 +188,8 @@ enum DestinationWriteTarget {
         var failedDrafts: [URL] = []
         for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             guard isCaptureDraftFilename(file.lastPathComponent),
-                  file.lastPathComponent != liveDraftFilename else { continue }
+                  file.lastPathComponent != liveDraftFilename,
+                  !LiveCaptureDraftRegistration.contains(file) else { continue }
             do {
                 let values = try file.resourceValues(forKeys: [.isRegularFileKey, .creationDateKey, .contentModificationDateKey])
                 guard values.isRegularFile == true else { continue }

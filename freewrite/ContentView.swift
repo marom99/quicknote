@@ -425,6 +425,7 @@ struct ContentView: View {
     @State private var pendingDestinationSettingsCloseAction: DestinationSettingsCloseAction? = nil
     @State private var showingDiscardDestinationSettingsConfirmation = false
     @State private var inProgressCaptureFilename: String? = nil
+    @State private var liveCaptureDraftRegistration: LiveCaptureDraftRegistration?
     @State private var captureStartedAt: Date? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
@@ -779,6 +780,7 @@ struct ContentView: View {
     }
 
     private func beginFreshCaptureSession(clearText: Bool) {
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -872,6 +874,9 @@ struct ContentView: View {
             )
         case .title:
             filename = DestinationWriteTarget.captureDraftFilename(captureId: captureId)
+            liveCaptureDraftRegistration = LiveCaptureDraftRegistration(
+                fileURL: documentsDirectory.appendingPathComponent(filename)
+            )
         }
 
         inProgressCaptureFilename = filename
@@ -898,6 +903,7 @@ struct ContentView: View {
             if let filename = inProgressCaptureFilename {
                 deleteCaptureFileIfExists(filename)
                 removeEntry(withFilename: filename)
+                liveCaptureDraftRegistration = nil
                 inProgressCaptureFilename = nil
                 captureStartedAt = nil
             }
@@ -962,6 +968,7 @@ struct ContentView: View {
             }
         }
 
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         selectedEntryId = nil
@@ -1341,6 +1348,7 @@ struct ContentView: View {
         selectedVideoHasTranscript = false
         didCopyTranscript = false
         thumbnailMemoryCache.removeAllObjects()
+        liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
         text = ""

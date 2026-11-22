@@ -122,7 +122,7 @@ struct HumanEntry: Identifiable {
 - Selecting a saved History entry binds the editor to that file. Subsequent edits, including clearing all text, must save that selected file and must not start a new capture.
 - A live capture finalizes before selecting History, switching or adding destinations, applying destination settings, creating a New Entry, closing the window, or terminating the app.
 - Empty live captures are deleted. A nonempty Title capture is renamed from its hidden draft to a sanitized first-paragraph filename (80 characters maximum), with a timestamp fallback and `-2`, `-3`, etc. collision suffixes.
-- Journal loading recovers orphaned title drafts (for example after Force Quit) into normal History files using the same title rules, deletes whitespace-only orphans, and never touches the current live draft; unreadable drafts remain on disk for a later retry.
+- Journal loading recovers orphaned title drafts (for example after Force Quit) into normal History files using the same title rules and deletes whitespace-only orphans. A process-wide, destination-path-scoped registry protects live drafts in every window until finalization, discard, or view teardown; unreadable drafts remain on disk for a later retry.
 - Finalization must run while the capture's destination is still active because autosave, draft cleanup, and title renaming all resolve against the active destination directory.
 
 **Location** (active destination root):
