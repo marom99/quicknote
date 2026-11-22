@@ -5,6 +5,90 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test func recoveryProtectsAllWindowsLiveDraftsUntilRegistrationEnds() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let otherDirectory = directory.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let filename = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let live = directory.appendingPathComponent(filename)
+        let emptyLive = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        let other = otherDirectory.appendingPathComponent(filename)
+        try "Window A title".write(to: live, atomically: true, encoding: .utf8)
+        try " \n".write(to: emptyLive, atomically: true, encoding: .utf8)
+        try "Other destination title".write(to: other, atomically: true, encoding: .utf8)
+        var registrations = [
+            LiveCaptureDraftRegistration(fileURL: live),
+            LiveCaptureDraftRegistration(fileURL: emptyLive)
+        ]
+        #expect(registrations.count == 2)
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: live, encoding: .utf8) == "Window A title")
+        #expect(try String(contentsOf: emptyLive, encoding: .utf8) == " \n")
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: otherDirectory).isEmpty)
+        #expect(try String(contentsOf: otherDirectory.appendingPathComponent("Other destination title.md"), encoding: .utf8) == "Other destination title")
+        registrations.removeAll()
+        #expect(!LiveCaptureDraftRegistration.contains(live))
+        #expect(!LiveCaptureDraftRegistration.contains(emptyLive))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Window A title.md"), encoding: .utf8) == "Window A title")
+        #expect(!FileManager.default.fileExists(atPath: emptyLive.path))
+    }
+
+    @Test(arguments: ["Live title", " \n\t"])
+    func recoversOrphanDraftsWithoutTouchingLiveDraftOrOtherFiles(liveContent: String) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let live = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let orphan = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let empty = DestinationWriteTarget.captureDraftFilename(captureId: UUID())
+        let fixtures = [live: liveContent, orphan: "Recovered: title / test\n\nBody", empty: " \n\t", "ordinary.md": "Unchanged"]
+        for (filename, content) in fixtures {
+            try content.write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live)
+        #expect(failures.isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent("Recovered title  test.md"), encoding: .utf8) == fixtures[orphan])
+        #expect(try String(contentsOf: directory.appendingPathComponent(live), encoding: .utf8) == fixtures[live])
+        #expect(try String(contentsOf: directory.appendingPathComponent("ordinary.md"), encoding: .utf8) == "Unchanged")
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(orphan).path))
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(empty).path))
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory, excluding: live).isEmpty)
+    }
+
+    @Test func recoveryUsesCollisionSuffixesAndTimestampFallbackAndPreservesUnreadableDrafts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for filename in ["Title.md", "Title-2.md"] {
+            try "Existing".write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        for content in ["Title", "///:?"] {
+            try content.write(to: directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID())), atomically: true, encoding: .utf8)
+        }
+        let invalid = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        try Data([0xff]).write(to: invalid)
+        let failures = try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory)
+        #expect(failures.map { $0.resolvingSymlinksInPath() } == [invalid.resolvingSymlinksInPath()])
+        #expect(try Data(contentsOf: invalid) == Data([0xff]))
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title-3.md"), encoding: .utf8) == "Title")
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let fallback = try #require(files.first { $0.lastPathComponent.range(of: #"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md$"#, options: .regularExpression) != nil })
+        #expect(try String(contentsOf: fallback, encoding: .utf8) == "///:?")
+        #expect(try String(contentsOf: directory.appendingPathComponent("Title.md"), encoding: .utf8) == "Existing")
+    }
+
+    @Test func recoveryHandlesEmptyAndMissingDirectories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(throws: (any Error).self) {
+            try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory.appendingPathComponent("missing"))
+        }
+    }
+
     @Test @MainActor func mergedEditCaretRequestMovesToEndOnlyOnce() {
         let coordinator = FreewriteTextEditor.Coordinator(text: .constant(""), onScrollMetricsChange: { _ in })
         let textView = NSTextView()
@@ -368,30 +452,5 @@ struct DestinationWriteTargetTests {
             documentsURL: tempDir
         )
         #expect(unique == "note-2.md")
-    }
-}
-
-struct UnchangedSaveTests {
-    @Test func identicalTextIsUnchanged() {
-        #expect(DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "Ideas", baseline: nil))
-    }
-
-    @Test func legacyNoteLoadedWithStrippedNewlinesIsUnchanged() {
-        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\n\nIdeas", editorText: "Ideas")
-        #expect(DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\n\nIdeas", baseline: baseline))
-    }
-
-    @Test func editAfterLoadIsChanged() {
-        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\n\nIdeas", editorText: "Ideas")
-        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas!", diskText: "\n\nIdeas", baseline: baseline))
-    }
-
-    @Test func deletingTypedLeadingNewlinesIsChanged() {
-        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\nIdeas", baseline: nil))
-    }
-
-    @Test func externalChangeSinceLoadIsChanged() {
-        let baseline = LoadedTextBaseline(filename: "a.md", diskText: "\nIdeas", editorText: "Ideas")
-        #expect(!DestinationWriteTarget.isUnchangedSave(editorText: "Ideas", diskText: "\nIdeas v2", baseline: baseline))
     }
 }

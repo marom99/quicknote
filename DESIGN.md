@@ -188,6 +188,7 @@ Corners are restrained. Sidebar rows and video thumbnails use a gentle **4px rad
 - **Style:** A flat strip (40px, with 12px vertical padding) at the bottom of the window, separated from the page by a 1px muted top border; content-matched background (white/black), with an 8px editor content gap above the border.
 - **State:** Always visible at full opacity while writing. Focus-timer auto-hide is not part of the current product surface.
 - **Treatment:** Gray text labels and icons separated by muted dots; each darkens on hover.
+- **New Note confirmation:** After a successful save, “Saved to <destination name>” appears just above the bottom nav in the same 13px muted label style, then fades after about two seconds. No border, shadow, or additional chrome; an empty canvas or failed write shows no confirmation.
 
 ### Video Player
 - **Style:** Standard AVKit controls. The player surface fills the content area with no chrome, so the recording is the whole experience.
