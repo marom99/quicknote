@@ -178,7 +178,7 @@ The main view containing all UI and business logic.
 - `createNewEntry()` - Creates new text entry
 - `saveEntry(entry:)` - Saves text to .md file
 - `loadEntry(entry:)` - Loads text or video for display
-- `deleteEntry(entry:)` - Deletes entry and associated files
+- `deleteEntry(entry:)` - Moves the note and associated video assets to macOS Trash via `HistoryTrash`, retaining original/resulting URLs. An eight-second “Moved to Trash” banner restores files and the History row with Undo; switching destinations clears the affordance. Undo reselects/reloads a note that was selected before deletion, including an Existing target. Deleting the last selected entry leaves a blank, unbound canvas in every mode without creating a replacement file. If typing recreates the target before Undo, its user content is never overwritten. Restored Title drafts are finalized directly to unique visible title filenames rather than left hidden.
 - `saveVideoEntry(from:)` - Saves recorded video and creates metadata
 
 **Important**: When modifying the `entries` array from async contexts, wrap in `DispatchQueue.main.async` to prevent collection mutation crashes.
