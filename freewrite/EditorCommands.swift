@@ -45,7 +45,7 @@ struct EditorCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            commandButton("New Entry", .newEntry)
+            commandButton("New Note", .newEntry)
         }
 
         CommandGroup(after: .sidebar) {

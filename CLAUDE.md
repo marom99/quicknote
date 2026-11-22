@@ -275,7 +275,7 @@ struct VideoPlayerView: View {
 
 ### Keyboard Shortcuts
 
-- **Cmd+N**: New Entry, using `createNewEntry()` just like the bottom-nav button (not a new window).
+- **Cmd+N**: New Note, using `createNewEntry()` just like the bottom-nav button (not a new window).
 - **Cmd+Shift+H**: Opens History via `openHistorySidebar()`, preserving the unsaved destination-settings confirmation; does not close History if already open.
 - **Cmd+,**: Opens the active destination settings rail via `openDestinationSettings()`; does not reset unsaved edits if already open.
 - `EditorCommands` is attached to the app scene with `.commands`; it replaces `.newItem` and `.appSettings` to avoid duplicate shortcuts. `ContentView` publishes `EditorCommandActions` with `.focusedSceneValue`, so commands target only the focused window and are disabled without one.
