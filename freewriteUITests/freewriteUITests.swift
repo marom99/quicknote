@@ -23,6 +23,31 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testTypingImmediatelyAfterLaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.typeText("Launch focus regression")
+
+        XCTAssertEqual(app.textViews["mainEditor"].value as? String, "Launch focus regression")
+    }
+
+    @MainActor
+    func testTypingAfterCancelingDestinationSettings() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        let name = app.textFields["Display name"]
+        name.click()
+        name.typeText(" edited")
+        app.buttons["Cancel"].click()
+
+        app.typeText("Typing after Cancel")
+
+        XCTAssertEqual(app.textViews["mainEditor"].value as? String, "Typing after Cancel")
+    }
+
+    @MainActor
     func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
         let app = XCUIApplication()
         app.launch()
