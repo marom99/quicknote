@@ -537,6 +537,7 @@ struct ContentView: View {
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var noteSaveState = NoteSaveState()
+    @State private var configuredNoteOpenFailed = false
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var historySearchQuery = ""
@@ -1160,6 +1161,7 @@ struct ContentView: View {
     }
 
     private func bindToResolvedWriteTarget(appendSeparator: Bool = false) -> Bool {
+        configuredNoteOpenFailed = false
         guard let destination = destinationStore.activeDestination,
               destination.saveMode == .rolling || destination.saveMode == .existing,
               let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
@@ -1215,7 +1217,10 @@ struct ContentView: View {
             entries.insert(entry, at: 0)
         }
 
-        guard loadEntry(entry: entry) else { return false }
+        guard loadEntry(entry: entry) else {
+            configuredNoteOpenFailed = true
+            return false
+        }
 
         if appendSeparator {
             text += DestinationWriteTarget.sessionSeparator()
@@ -1486,6 +1491,7 @@ struct ContentView: View {
 
     // Add function to load existing entries
     private func loadExistingEntries() {
+        configuredNoteOpenFailed = false
         guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
             print("Active destination is unavailable; showing empty History")
             entries = []
@@ -1671,6 +1677,11 @@ struct ContentView: View {
                         .ignoresSafeArea(edges: .top)
                         // Avoid animating AVKit/AppKit representables when History opens.
                         .transaction { $0.animation = nil }
+                } else if configuredNoteOpenFailed && selectedEntryId == nil {
+                    Text("The configured note couldn't be opened. Choose another note in History or Destination settings.")
+                        .foregroundStyle(.secondary)
+                        .padding(editorInset)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     // Show text editor for text entries
                     FreewriteTextEditor(

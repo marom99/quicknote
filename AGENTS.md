@@ -274,7 +274,7 @@ On app launch or destination reload:
 5. Rolling / Existing bind the editor to their resolved write target.
 6. New note clears selection and presents a fresh, unbound canvas. It does not create a file until the user types non-whitespace content.
 
-Markdown that cannot be decoded as UTF-8 appears in History by filename. Failing to read a note shows an alert and does not bind the editor to it.
+Markdown that cannot be decoded as UTF-8 appears in History by filename. Failing to read a note shows an alert and does not bind the editor to it. If a configured Rolling / Existing note fails to open and no other note is selected, the canvas shows a message instead of accepting edits that cannot be saved.
 
 ## Auto-Save Behavior
 
