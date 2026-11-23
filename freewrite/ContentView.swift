@@ -615,11 +615,9 @@ struct ContentView: View {
     }
 
     private var activeDestinationHistoryLabel: String {
-        if let path = destinationStore.activeDocumentsPath {
-            return path
-        }
-        let name = destinationStore.activeDestination?.displayName ?? "Journal"
-        return "\(name) (unavailable)"
+        destinationStore.activeAccessFailed
+            ? "\(activeDestinationDisplayName) (unavailable)"
+            : activeDestinationDisplayName
     }
 
     private func getVideoEntryDirectory(for videoFilename: String) -> URL? {
@@ -1818,7 +1816,7 @@ struct ContentView: View {
                     Spacer()
                     HStack {
                         HStack(spacing: 8) {
-                            destinationChip(textColor: textColor, textHoverColor: textHoverColor)
+                            destinationChip()
 
                             if isViewingVideoEntry {
                                 if selectedVideoHasTranscript {
@@ -1829,6 +1827,7 @@ struct ContentView: View {
                                             .font(.system(size: 13))
                                     }
                                     .buttonStyle(.plain)
+                                    .help("Copy the video transcript")
                                     .foregroundColor(isHoveringCopyTranscript ? textHoverColor : textColor)
                                     .onHover { hovering in
                                         isHoveringCopyTranscript = hovering
@@ -1858,6 +1857,7 @@ struct ContentView: View {
                                     .fixedSize()
                             }
                             .buttonStyle(.plain)
+                            .help("Start a new note")
                             .foregroundColor(isHoveringNewEntry ? textHoverColor : textColor)
                             .onHover { hovering in
                                 isHoveringNewEntry = hovering
@@ -1882,6 +1882,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringThemeToggle ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .help(colorScheme == .light ? "Switch to dark mode" : "Switch to light mode")
                             .accessibilityIdentifier("themeToggleButton")
                             .onHover { hovering in
                                 isHoveringThemeToggle = hovering
@@ -1904,6 +1905,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringClock ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
+                            .help(showingSidebar ? "Hide History" : "Show History")
                             .accessibilityIdentifier("historyButton")
                             .onHover { hovering in
                                 isHoveringClock = hovering
@@ -1993,6 +1995,8 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .help("Reveal destination in Finder")
+                    .accessibilityIdentifier("historyHeader")
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .onHover { hovering in
@@ -2244,7 +2248,7 @@ struct ContentView: View {
 
     private func backgroundColor(for entry: HumanEntry) -> Color {
         if entry.id == selectedEntryId {
-            return Color.gray.opacity(0.1)  // More subtle selection highlight
+            return colorScheme == .dark ? Color.white.opacity(0.2) : Color.gray.opacity(0.1)
         } else if entry.id == hoveredEntryId {
             return Color.gray.opacity(0.05)  // Even more subtle hover state
         } else {
@@ -2386,7 +2390,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func destinationChip(textColor: Color, textHoverColor: Color) -> some View {
+    private func destinationChip() -> some View {
         Menu {
             ForEach(destinationStore.destinations) { destination in
                 Button {
@@ -2414,16 +2418,13 @@ struct ContentView: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "folder")
-                    .font(.system(size: 12))
-                Text(activeDestinationDisplayName)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-            }
-            .foregroundColor(isHoveringDestinationChip ? textHoverColor : textColor)
+            Text(activeDestinationDisplayName)
+                .font(.system(size: 13))
+                .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
+        .opacity(isHoveringDestinationChip ? 1 : (colorScheme == .light ? 0.5 : 0.45))
+        .help("Switch or manage save destinations")
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)
         .onHover { hovering in
