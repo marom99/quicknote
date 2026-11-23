@@ -187,7 +187,8 @@ struct CaptureDraftTests {
         #expect(try String(contentsOf: file, encoding: .utf8) == "Previous")
     }
 
-    @Test func completedAppendIsNotRepeatedWhenRecoveringAfterAnInterruption() throws {
+    @Test(arguments: ["", "\nAppended by another app"])
+    func completedAppendIsNotRepeatedWhenRecoveringAfterAnInterruption(suffix: String) throws {
         let f = try Fixture()
         defer { f.cleanUp() }
         var draft = f.draft(.existing)
@@ -196,15 +197,48 @@ struct CaptureDraftTests {
         let previous = Data("Original".utf8)
         let output = previous + Data((draft.separator + draft.text).utf8)
         draft.pendingWrite = .init(filename: file.lastPathComponent, previousDigest: Data(SHA256.hash(data: previous)),
-                                   savedDigest: Data(SHA256.hash(data: output)))
+                                   savedDigest: Data(SHA256.hash(data: output)), previousByteCount: previous.count)
         try f.store.preserve(draft)
-        try output.write(to: file)
+        let onDisk = output + Data(suffix.utf8)
+        try onDisk.write(to: file)
 
         let restored = try f.store.load()
         var recovered = try #require(restored)
         #expect(try f.store.save(&recovered, in: f.destination) == file)
-        #expect(try Data(contentsOf: file) == output)
+        #expect(try Data(contentsOf: file) == onDisk)
         #expect(try f.store.load() == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func retriesPartialAppendOnlyIfNoOtherBytesWereAdded(anotherAppAppended: Bool) throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.existing)
+        draft.text = "Éclair"
+        let file = try f.target(for: draft)
+        let previous = Data("Original".utf8)
+        let addition = Data((draft.separator + draft.text).utf8)
+        let complete = previous + addition
+        var partial = previous + addition.prefix(draft.separator.utf8.count + 1)
+        if anotherAppAppended { partial += Data("Other app's edits".utf8) }
+        draft.pendingWrite = .init(filename: file.lastPathComponent, previousDigest: Data(SHA256.hash(data: previous)),
+                                   savedDigest: Data(SHA256.hash(data: complete)), previousByteCount: previous.count)
+        try f.store.preserve(draft)
+        try partial.write(to: file)
+
+        let restored = try f.store.load()
+        var recovered = try #require(restored)
+        if anotherAppAppended {
+            #expect(throws: CaptureDraftStore.SaveError.changedTarget) {
+                try f.store.save(&recovered, in: f.destination)
+            }
+            #expect(try Data(contentsOf: file) == partial)
+            #expect(try f.store.load() == draft)
+        } else {
+            #expect(try f.store.save(&recovered, in: f.destination) == file)
+            #expect(try Data(contentsOf: file) == complete)
+            #expect(try f.store.load() == nil)
+        }
     }
 
     @Test func recoveryWillNotOverwriteAFileChangedDuringAnInterruptedWrite() throws {

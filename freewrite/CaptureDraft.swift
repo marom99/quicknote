@@ -7,6 +7,7 @@ struct CaptureDraft: Codable, Equatable {
         let filename: String
         let previousDigest: Data?
         let savedDigest: Data
+        var previousByteCount: Int? = nil
     }
 
     let destination: SaveDestination
@@ -126,32 +127,49 @@ struct CaptureDraftStore {
         let target = directory.appendingPathComponent(filename)
         let original = try read(target)
         let originalDigest = original.map(digest)
-        if let pending = draft.pendingWrite, originalDigest == pending.savedDigest {
-            // The app stopped after writing the note but before clearing the local draft.
-            try discard()
-            return target
-        }
-        if let pending = draft.pendingWrite, originalDigest != pending.previousDigest {
-            throw SaveError.changedTarget
+        let addition = Data(((mode == .newNote ? "" : draft.separator) + draft.text).utf8)
+        var appendedBytes = 0
+        if let pending = draft.pendingWrite {
+            if matchesSavedPrefix(original, pending: pending, addition: addition) {
+                try discard()
+                return target
+            }
+            if originalDigest != pending.previousDigest {
+                guard let original, let previousByteCount = pending.previousByteCount,
+                      let previousDigest = pending.previousDigest,
+                      previousByteCount >= 0, previousByteCount < original.count,
+                      digest(original.prefix(previousByteCount)) == previousDigest else {
+                    throw SaveError.changedTarget
+                }
+                let partial = original.dropFirst(previousByteCount)
+                // Resume only when the file ends in a byte-for-byte prefix of this capture.
+                guard partial.count < addition.count, addition.starts(with: partial) else {
+                    throw SaveError.changedTarget
+                }
+                appendedBytes = partial.count
+            }
         }
         if mode == .existing && original == nil { throw SaveError.missingTarget }
         if mode == .newNote && original != nil { throw SaveError.changedTarget }
         guard canWrite(target) else { throw SaveError.unsavedEditor }
 
-        if let original, String(data: original, encoding: .utf8) == nil { throw SaveError.invalidText }
-        let addition = Data(((mode == .newNote ? "" : draft.separator) + draft.text).utf8)
-        let outputDigest = digest((original ?? Data()) + addition)
+        if appendedBytes == 0, let original, String(data: original, encoding: .utf8) == nil {
+            throw SaveError.invalidText
+        }
 
         if draft.pendingWrite == nil {
             var prepared = draft
-            prepared.pendingWrite = .init(filename: filename, previousDigest: originalDigest, savedDigest: outputDigest)
+            prepared.pendingWrite = .init(filename: filename, previousDigest: originalDigest,
+                                          savedDigest: digest((original ?? Data()) + addition),
+                                          previousByteCount: original?.count)
             try preserve(prepared)
             draft = prepared
         }
+        guard let pending = draft.pendingWrite else { throw SaveError.changedTarget }
 
         do {
             if let originalDigest {
-                try append(addition, to: target, after: originalDigest)
+                try append(addition.dropFirst(appendedBytes), to: target, after: originalDigest)
             } else {
                 // Move a complete file into place without replacing a newly created note.
                 let staged = directory.appendingPathComponent(".quicknote-write-\(UUID()).tmp")
@@ -159,11 +177,11 @@ struct CaptureDraftStore {
                 try addition.write(to: staged, options: .atomic)
                 try fileManager.moveItem(at: staged, to: target)
             }
-            if try read(target).map(digest) != outputDigest {
+            if !matchesSavedPrefix(try read(target), pending: pending, addition: addition) {
                 throw SaveError.changedTarget
             }
         } catch {
-            if (try? read(target).map(digest) == originalDigest) == true {
+            if (try? read(target).map(digest) == pending.previousDigest) == true {
                 var retryable = draft
                 retryable.pendingWrite = nil
                 if (try? preserve(retryable)) != nil { draft = retryable }
@@ -172,6 +190,16 @@ struct CaptureDraftStore {
         }
         try discard()
         return target
+    }
+
+    private func matchesSavedPrefix(_ contents: Data?, pending: CaptureDraft.PendingWrite, addition: Data) -> Bool {
+        guard let contents else { return false }
+        if let previousByteCount = pending.previousByteCount {
+            guard previousByteCount >= 0, addition.count <= contents.count,
+                  previousByteCount <= contents.count - addition.count else { return false }
+            return digest(contents.prefix(previousByteCount + addition.count)) == pending.savedDigest
+        }
+        return digest(contents) == pending.savedDigest
     }
 
     private func append(_ data: Data, to target: URL, after previousDigest: Data) throws {
