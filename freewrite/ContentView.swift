@@ -1357,13 +1357,26 @@ struct ContentView: View {
     private func saveDestinationSettingsDraft() {
         guard canSaveDestinationSettings, let destination = destinationStore.activeDestination else { return }
 
-        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            finalizeCaptureSession()
-        } else if let currentId = selectedEntryId,
-                  let currentEntry = entries.first(where: { $0.id == currentId }),
-                  currentEntry.entryType == .text {
-            saveEntry(entry: currentEntry, updatePreview: false)
+        var draftDestination = destination
+        draftDestination.saveMode = settingsSaveMode
+        draftDestination.rollingPeriod = settingsRollingPeriod
+        draftDestination.filenameFormat = settingsFilenameFormat
+        draftDestination.existingNoteFilename = settingsExistingNoteFilename
+        if let documentsURL = getDocumentsDirectory(),
+           let target = DestinationWriteTarget.resolve(
+               for: draftDestination,
+               documentsURL: documentsURL,
+               createIfMissing: false
+           ) {
+            do {
+                try DestinationWriteTarget.validateSettingsTarget(target)
+            } catch {
+                noteOpenError = "\(target.filename)\n\(error.localizedDescription)\nDestination settings were not saved."
+                return
+            }
         }
+
+        guard prepareToLeaveEntry() else { return }
 
         if settingsSaveMode == .existing,
            let filename = settingsExistingNoteFilename,

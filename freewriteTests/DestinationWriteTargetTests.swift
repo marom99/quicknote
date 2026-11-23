@@ -160,6 +160,34 @@ struct DestinationWriteTargetTests {
     }
 
     @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func settingsValidationRejectsNonUTF8TargetWithoutChangingIt(mode: DestinationSaveMode) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = SaveDestination(
+            id: UUID(), displayName: "Test", isDefault: false,
+            saveMode: mode, existingNoteFilename: "journal.md"
+        )
+        let now = Date()
+        let missing = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now, createIfMissing: false
+        ))
+        try DestinationWriteTarget.validateSettingsTarget(missing)
+        #expect(!FileManager.default.fileExists(atPath: missing.fileURL.path))
+
+        let invalid = Data([0xFF])
+        try invalid.write(to: missing.fileURL)
+        let existing = try #require(DestinationWriteTarget.resolve(
+            for: destination, documentsURL: directory, now: now, createIfMissing: false
+        ))
+        #expect(throws: (any Error).self) { try DestinationWriteTarget.validateSettingsTarget(existing) }
+        #expect(try Data(contentsOf: existing.fileURL) == invalid)
+
+        try "Readable note".write(to: existing.fileURL, atomically: true, encoding: .utf8)
+        try DestinationWriteTarget.validateSettingsTarget(existing)
+    }
+
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
     func unboundEditRecreatesDeletedTarget(mode: DestinationSaveMode) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
