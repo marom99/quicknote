@@ -1306,7 +1306,6 @@ struct ContentView: View {
             } else {
                 syncSettingsDraftFromActiveDestination()
                 showingDestinationSettings = false
-                historySearchQuery = ""
                 showingSidebar = true
             }
         }
@@ -2179,6 +2178,9 @@ struct ContentView: View {
         ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
+        .onChange(of: showingSidebar) { _, isShowing in
+            if isShowing { historySearchQuery = "" }
+        }
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
             showingDestinationSettings = false
@@ -2259,7 +2261,7 @@ struct ContentView: View {
         HistorySearch.filter(
             entries,
             query: historySearchQuery,
-            title: { $0.previewText },
+            title: historyRowTitle(for:),
             body: { entry in
                 // The open note's latest edits may not be saved yet.
                 entry.id == selectedEntryId && entry.entryType == .text ? text : entry.searchableBody
