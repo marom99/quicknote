@@ -46,12 +46,14 @@ struct HistoryEntryReaderTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == before)
     }
 
-    @Test func readsExistingVideoTranscriptsForSearch() throws {
+    @Test(arguments: ["md", "MD"])
+    func readsExistingVideoTranscriptsForSearch(markdownExtension: String) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let video = directory.appendingPathComponent("Videos/Video")
         try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try "Video Entry".write(to: directory.appendingPathComponent("Video.md"), atomically: true, encoding: .utf8)
+        try "Video Entry".write(to: directory.appendingPathComponent("Video.\(markdownExtension)"),
+                                atomically: true, encoding: .utf8)
         try Data().write(to: video.appendingPathComponent("Video.mov"))
         try "Transcript includes prism".write(to: video.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
 
@@ -59,5 +61,25 @@ struct HistoryEntryReaderTests {
         #expect(entry.entryType == .video)
         #expect(entry.videoFilename == "Video.mov")
         #expect(HistorySearch.matches(query: "prism", title: entry.previewText, body: entry.searchableBody))
+    }
+
+    @Test func uppercaseMarkdownRefreshesAsTextAfterAnAppend() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let filename = "[\(UUID())]-[2026-02-20-08-01-04].MD"
+        let url = directory.appendingPathComponent(filename)
+        let reader = HistoryEntryReader(directory: directory)
+        try "Original".write(to: url, atomically: true, encoding: .utf8)
+        let before = try #require(reader.entry(at: url))
+        let updated = "Original\nAppended capture"
+        try updated.write(to: url, atomically: true, encoding: .utf8)
+
+        let after = try #require(reader.entry(at: url, includeUnreadable: false))
+        #expect(after.id == before.id)
+        #expect(after.entryType == .text)
+        #expect(after.searchableBody == updated)
+        let canonicalDate = try #require(HistoryEntryReader.canonicalTimestamp(for: filename.dropLast(2) + "md"))
+        #expect(after.timestamp == canonicalDate)
     }
 }

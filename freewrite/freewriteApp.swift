@@ -120,7 +120,7 @@ enum WindowChrome {
 
     private static func shouldStyle(_ window: NSWindow) -> Bool {
         // Style ordinary app windows; skip menus / status items if any.
-        window.contentView != nil && !window.className.contains("NSStatusBar")
+        window.contentView != nil && !(window is NSPanel) && !window.className.contains("NSStatusBar")
     }
 
     private static func titlebarContainer(in window: NSWindow) -> NSView? {
@@ -291,15 +291,7 @@ struct freewriteApp: App {
         }
 
         MenuBarExtra {
-            Button("Quick Capture") {
-                QuickCaptureCenter.shared.trigger()
-            }
-            .keyboardShortcut("n", modifiers: [.control, .option, .command])
-            Button("Show Window") {
-                QuickCaptureCenter.shared.showWindow()
-            }
-            Divider()
-            Button("Quit") { NSApp.terminate(nil) }
+            CaptureShortcutMenu()
         } label: {
             QuickCaptureMenuLabel()
         }
@@ -308,8 +300,6 @@ struct freewriteApp: App {
 
 // Add AppDelegate to handle window configuration
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var globalHotKey: GlobalHotKey?
-
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         for window in sender.windows {
             if let delegate = window.delegate as? EditorWindowCloseDelegate,
@@ -324,13 +314,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        globalHotKey = GlobalHotKey {
-            MainActor.assumeIsolated { QuickCaptureCenter.shared.trigger() }
-        }
+        CaptureShortcutSettings.shared.start()
         WindowChrome.startObserving()
 
         if let window = NSApplication.shared.windows.first(where: {
-            $0.styleMask.contains(.titled) && !$0.className.contains("NSStatusBar")
+            $0.styleMask.contains(.titled) && !($0 is NSPanel) && !$0.className.contains("NSStatusBar")
         }) {
             // Ensure window starts in windowed mode
             if window.styleMask.contains(.fullScreen) {

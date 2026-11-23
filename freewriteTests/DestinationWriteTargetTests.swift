@@ -22,8 +22,9 @@ struct DestinationWriteTargetTests {
             atomically: true,
             encoding: .utf8
         )
+        try Data().write(to: directory.appendingPathComponent("Videos/Uppercase.mov"))
         for name in ["journal.md", "Ideas 10.md", "Ideas 2.MD", "notes.txt", ".hidden.md",
-                     "twice.md.md", " leading.md", "\(videoBase).md",
+                     "twice.md.md", " leading.md", "\(videoBase).md", "Uppercase.MD",
                      DestinationWriteTarget.captureDraftFilename(captureId: UUID())] {
             try "x".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
         }

@@ -134,23 +134,24 @@ enum DestinationWriteTarget {
             .filter { filename in
                 !isCaptureDraftFilename(filename)
                     && existingNoteFilename(fromInput: filename) == filename
-                    && !hasVideoAsset(forNote: filename, in: directory, fileManager: fileManager)
+                    && videoAssetFilename(forNote: filename, in: directory, fileManager: fileManager) == nil
             }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    private static func hasVideoAsset(forNote filename: String, in directory: URL, fileManager: FileManager) -> Bool {
-        let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
-        guard videoFilename != filename else { return false }
+    static func videoAssetFilename(forNote filename: String, in directory: URL,
+                                   fileManager: FileManager = .default) -> String? {
+        let basename = (filename as NSString).deletingPathExtension
+        let videoFilename = basename + ".mov"
         let videosDirectory = directory.appendingPathComponent("Videos", isDirectory: true)
         let candidates = [
             videosDirectory
-                .appendingPathComponent((videoFilename as NSString).deletingPathExtension, isDirectory: true)
+                .appendingPathComponent(basename, isDirectory: true)
                 .appendingPathComponent(videoFilename),
             videosDirectory.appendingPathComponent(videoFilename),
             directory.appendingPathComponent(videoFilename),
         ]
-        return candidates.contains { fileManager.fileExists(atPath: $0.path) }
+        return candidates.contains { fileManager.fileExists(atPath: $0.path) } ? videoFilename : nil
     }
 
     /// Filename for a typed Existing note name, or nil when it is not a root-level basename.

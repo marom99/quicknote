@@ -172,7 +172,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
-    var quickCaptureFocusRequest: UUID?
     var selectionFocusRequest: UUID?
 
     let editorID: UUID?
@@ -288,15 +287,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
             context.coordinator.lastAppliedScrollRequest = request
         }
 
-        if let quickCaptureFocusRequest,
-           quickCaptureFocusRequest != context.coordinator.lastQuickCaptureFocusRequest {
-            context.coordinator.lastQuickCaptureFocusRequest = quickCaptureFocusRequest
-            DispatchQueue.main.async { [weak scrollView] in
-                guard let textView = scrollView?.documentView as? NSTextView else { return }
-                QuickCaptureInputGate.resume(textView)
-            }
-        }
-
         if let selectionFocusRequest,
            selectionFocusRequest != context.coordinator.lastSelectionFocusRequest {
             context.coordinator.lastSelectionFocusRequest = selectionFocusRequest
@@ -324,7 +314,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
-        var lastQuickCaptureFocusRequest: UUID?
         var lastSelectionFocusRequest: UUID?
         var lastConfiguredEditorID: UUID?
         var lastFocusRequest: UUID?
@@ -530,7 +519,6 @@ struct ContentView: View {
     @State private var editorScrollMetrics = EditorScrollMetrics()
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var editorFocusRequest = UUID()
-    @State private var quickCaptureFocusRequest: UUID?
     @State private var historySelectionFocusRequest: UUID?
     @State private var historySelectionFocusEntryId: UUID?
     @State private var editorCaretEndRequest: UUID?
@@ -1598,7 +1586,6 @@ struct ContentView: View {
                     FreewriteTextEditor(
                         text: $text,
                         scrollRequest: $editorScrollRequest,
-                        quickCaptureFocusRequest: quickCaptureFocusRequest,
                         selectionFocusRequest: historySelectionFocusRequest,
                         editorID: selectedEntryId,
                         allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
@@ -1945,7 +1932,10 @@ struct ContentView: View {
                 prepareToLeaveEntry(onDiscard: { discardEditorChanges(then: continuation) })
             }
         ))
-        .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
+        .background(QuickCaptureWindowAccessor(canAcceptCapture: canAcceptQuickCapture))
+        .onReceive(NotificationCenter.default.publisher(for: .quickCaptureDidSave)) { notification in
+            if let url = notification.object as? URL { receiveQuickCapture(at: url) }
+        }
         .onChange(of: selectedEntryId) { _, newId in
             // Drop a History focus request once its note is no longer open, so a later editor can't replay it.
             if newId != historySelectionFocusEntryId {
@@ -2480,13 +2470,43 @@ struct ContentView: View {
         savedConfirmationID = UUID()
     }
 
-    private func startQuickCapture() {
-        showingSidebar = false
-        if !hasUnsavedDestinationSettingsChanges {
-            showingDestinationSettings = false
+    private func quickCaptureDirectory(for url: URL) -> URL? {
+        guard let directory = getDocumentsDirectory(),
+              CaptureDraftStore.sameFile(directory, url.deletingLastPathComponent()) else { return nil }
+        return directory
+    }
+
+    private func canAcceptQuickCapture(at url: URL) -> Bool {
+        guard let directory = quickCaptureDirectory(for: url),
+              let selected = entries.first(where: { $0.id == selectedEntryId }),
+              selected.entryType == .text else { return true }
+        let selectedURL = directory.appendingPathComponent(selected.filename)
+        return !CaptureDraftStore.sameFile(selectedURL, url) || !noteSaveState.hasUnsavedChanges(text, at: selectedURL)
+    }
+
+    private func receiveQuickCapture(at url: URL) {
+        guard let directory = quickCaptureDirectory(for: url) else { return }
+        let index = entries.firstIndex {
+            $0.filename.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame
+                && CaptureDraftStore.sameFile(directory.appendingPathComponent($0.filename), url)
         }
-        createNewEntry()
-        quickCaptureFocusRequest = UUID()
+        let actualURL = directory.appendingPathComponent(index.map { entries[$0].filename } ?? url.lastPathComponent)
+        guard let updated = HistoryEntryReader(directory: directory).entry(
+            at: actualURL, includeUnreadable: false
+        ) else { return }
+        if updated.entryType == .text,
+           let selected = entries.first(where: { $0.id == selectedEntryId }), selected.entryType == .text {
+            let selectedURL = directory.appendingPathComponent(selected.filename)
+            if CaptureDraftStore.sameFile(selectedURL, url), !noteSaveState.hasUnsavedChanges(text, at: selectedURL) {
+                text = updated.searchableBody
+                noteSaveState.didLoad(text, from: selectedURL)
+            }
+        }
+        if let index {
+            entries[index] = updated
+        } else {
+            entries.insert(updated, at: 0)
+        }
     }
 
     @ViewBuilder
