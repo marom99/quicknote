@@ -15,7 +15,7 @@ struct HistoryEntryReader {
 
     func entry(at url: URL, includeUnreadable: Bool = true) -> HumanEntry? {
         let filename = url.lastPathComponent
-        guard url.pathExtension == "md",
+        guard url.pathExtension.lowercased() == "md",
               !DestinationWriteTarget.isCaptureDraftFilename(filename) else { return nil }
         let body: String?
         do {
@@ -26,7 +26,7 @@ struct HistoryEntryReader {
             return nil
         }
         let date = Self.canonicalTimestamp(for: filename) ?? Self.modificationDate(for: url, fileManager: fileManager)
-        let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
+        let videoFilename = url.deletingPathExtension().lastPathComponent + ".mov"
         let videoDirectory = directory.appendingPathComponent("Videos", isDirectory: true)
         let videoEntryDirectory = videoDirectory.appendingPathComponent(
             (videoFilename as NSString).deletingPathExtension, isDirectory: true
@@ -65,7 +65,7 @@ struct HistoryEntryReader {
 
     static func canonicalTimestamp(for filename: String) -> Date? {
         guard filename.hasPrefix("["),
-              filename.hasSuffix("].md"),
+              filename.lowercased().hasSuffix("].md"),
               let divider = filename.range(of: "]-[") else { return nil }
 
         let uuidStart = filename.index(after: filename.startIndex)
