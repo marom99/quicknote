@@ -2277,13 +2277,15 @@ struct ContentView: View {
     }
 
     private func openHistoryResultInOtherDestination(_ result: HistoryResult) -> Bool {
+        func readEntry(in directory: URL) -> HumanEntry? {
+            HistoryEntryReader(directory: directory).entry(
+                at: directory.appendingPathComponent(result.entry.filename), includeUnreadable: false
+            )
+        }
+
         let previousDestination = destinationStore.activeDestinationId
         guard let destination = destinationStore.destinations.first(where: { $0.id == result.destinationID }),
-              let readableEntry = DestinationStore.withHistoryReadAccess(to: destination, read: { directory in
-                  HistoryEntryReader(directory: directory).entry(
-                      at: directory.appendingPathComponent(result.entry.filename), includeUnreadable: false
-                  )
-              }) else {
+              DestinationStore.withHistoryReadAccess(to: destination, read: readEntry(in:)) != nil else {
             noteOpenError = "This note is no longer available."
             return false
         }
@@ -2294,7 +2296,13 @@ struct ContentView: View {
             noteOpenError = "This destination is no longer available."
             return false
         }
-        guard loadEntry(entry: readableEntry) else {
+        // Activation can migrate the legacy default folder; bind using the final path.
+        guard let directory = getDocumentsDirectory(), let entry = readEntry(in: directory) else {
+            destinationStore.activateDestination(id: previousDestination)
+            noteOpenError = "This note is no longer available."
+            return false
+        }
+        guard loadEntry(entry: entry) else {
             destinationStore.activateDestination(id: previousDestination)
             return false
         }
