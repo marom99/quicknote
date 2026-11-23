@@ -1394,11 +1394,21 @@ struct ContentView: View {
     }
     
     private func selectEntry(_ entry: HumanEntry) {
-        guard selectedEntryId != entry.id else { return }
+        guard selectedEntryId != entry.id,
+              let targetEntry = entries.first(where: { $0.id == entry.id }),
+              loadEntry(entry: targetEntry, beforeDisplaying: prepareToLeaveEntry) else { return }
 
+        if targetEntry.entryType == .text {
+            DispatchQueue.main.async {
+                self.updatePreviewText(for: targetEntry)
+            }
+        }
+    }
+
+    private func prepareToLeaveEntry() -> Bool {
         if isCapturePerSessionMode, inProgressCaptureFilename != nil {
             finalizeCaptureSession(keepEditingOnSaveFailure: true)
-            guard inProgressCaptureFilename == nil else { return }
+            return inProgressCaptureFilename == nil
         } else if let currentId = selectedEntryId,
                   let currentEntry = entries.first(where: { $0.id == currentId }),
                   currentEntry.entryType == .text,
@@ -1408,21 +1418,10 @@ struct ContentView: View {
             } ?? true
             if hasUnsavedChanges {
                 noteSaveError = currentEntry.filename
-                return
+                return false
             }
         }
-
-        guard let targetEntry = entries.first(where: { $0.id == entry.id }) else {
-            return
-        }
-
-        guard loadEntry(entry: targetEntry) else { return }
-
-        if targetEntry.entryType == .text {
-            DispatchQueue.main.async {
-                self.updatePreviewText(for: targetEntry)
-            }
-        }
+        return true
     }
 
     private func reloadJournalForActiveDestination() {
@@ -2343,15 +2342,35 @@ struct ContentView: View {
     }
     
     @discardableResult
-    private func loadEntry(entry: HumanEntry) -> Bool {
+    private func loadEntry(entry: HumanEntry, beforeDisplaying: () -> Bool = { true }) -> Bool {
+        let videoFilename = resolvedVideoFilename(for: entry)
+        var loadedText = ""
+        if videoFilename == nil {
+            guard let documentsDirectory = getDocumentsDirectory() else { return false }
+            let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
+
+            do {
+                loadedText = try noteSaveState.load(from: fileURL)
+                print("Successfully loaded entry: \(entry.filename)")
+            } catch CocoaError.fileReadNoSuchFile {
+                // Soft-fail missing file (e.g. Existing note removed from disk).
+                print("Entry file missing: \(entry.filename)")
+            } catch {
+                print("Error loading entry: \(error)")
+                noteOpenError = "\(entry.filename)\n\(error.localizedDescription)"
+                return false
+            }
+        }
+
+        guard beforeDisplaying() else { return false }
         isLoadingEntry = true
         defer { isLoadingEntry = false }
 
-        if let videoFilename = resolvedVideoFilename(for: entry) {
+        text = loadedText
+        if let videoFilename {
             // Load video entry
             let videoURL = getVideoURL(for: videoFilename)
             let transcriptURL = getVideoTranscriptURL(for: videoFilename)
-            text = ""
             didCopyTranscript = false
             selectedVideoHasTranscript = transcriptURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
             if let videoURL, fileManager.fileExists(atPath: videoURL.path) {
@@ -2361,21 +2380,6 @@ struct ContentView: View {
                 print("Video file missing for entry: \(videoFilename)")
             }
         } else {
-            guard let documentsDirectory = getDocumentsDirectory() else { return false }
-            let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
-
-            do {
-                text = try noteSaveState.load(from: fileURL)
-                print("Successfully loaded entry: \(entry.filename)")
-            } catch CocoaError.fileReadNoSuchFile {
-                // Soft-fail missing file (e.g. Existing note removed from disk).
-                text = ""
-                print("Entry file missing: \(entry.filename)")
-            } catch {
-                print("Error loading entry: \(error)")
-                noteOpenError = "\(entry.filename)\n\(error.localizedDescription)"
-                return false
-            }
             currentVideoURL = nil
             selectedVideoHasTranscript = false
             didCopyTranscript = false
