@@ -249,6 +249,42 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testVisibleInvalidRollingEditPromptsBeforeOpeningHistory() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let save = app.buttons["Save"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let keepEditing = app.windows.firstMatch.sheets.firstMatch.buttons["Keep Editing"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        app.buttons["Rolling"].click()
+        save.click()
+
+        format.click()
+        format.typeKey("a", modifierFlags: .command)
+        format.typeText("yyyy/MM/dd")
+        XCTAssertFalse(save.isEnabled)
+        app.buttons["historyButton"].click()
+
+        let prompted = keepEditing.waitForExistence(timeout: 3)
+        if prompted {
+            keepEditing.click()
+        } else {
+            app.typeKey(",", modifierFlags: .command)
+        }
+        let draftFormat = format.value as? String
+        let couldSave = save.isEnabled
+
+        app.buttons["New note"].click()
+        save.click()
+
+        XCTAssertTrue(prompted, "Opening History should ask before dropping a visible invalid edit")
+        XCTAssertEqual(draftFormat, "yyyy/MM/dd")
+        XCTAssertFalse(couldSave)
+    }
+
+    @MainActor
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
