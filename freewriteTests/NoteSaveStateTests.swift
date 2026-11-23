@@ -117,4 +117,41 @@ struct NoteSaveStateTests {
         #expect(throws: (any Error).self) { try state.save("Loaded text", to: url) }
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
+
+    @Test func invalidUTF8NoteSurvivesFailedOpenAndAutosaves() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("non-utf8.md")
+        let original = Data([0x43, 0x61, 0x66, 0xE9])
+        try original.write(to: url)
+
+        var state = NoteSaveState()
+        #expect(throws: (any Error).self) { try state.load(from: url) }
+        #expect(throws: (any Error).self) { try state.save("", to: url) }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(throws: (any Error).self) { try state.save("New typing", to: url) }
+        #expect(try Data(contentsOf: url) == original)
+    }
+
+    @Test func failedReloadPreservesPreviousBaseline() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("note.md")
+        try "\nOriginal text".write(to: url, atomically: true, encoding: .utf8)
+
+        var state = NoteSaveState()
+        let editorText = try state.load(from: url)
+        #expect(editorText == "Original text")
+        let invalid = Data([0xFF])
+        try invalid.write(to: url)
+
+        #expect(throws: (any Error).self) { try state.load(from: url) }
+        #expect(throws: (any Error).self) { try state.save(editorText + " edit", to: url) }
+        #expect(try Data(contentsOf: url) == invalid)
+
+        try "External UTF-8 text".write(to: url, atomically: true, encoding: .utf8)
+        #expect(try state.save(editorText, to: url) == "External UTF-8 text")
+    }
 }

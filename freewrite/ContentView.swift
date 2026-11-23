@@ -570,6 +570,7 @@ struct ContentView: View {
     @State private var trashDestinationID: UUID? = nil
     @State private var trashNoticeID = UUID()
     @State private var trashError: String? = nil
+    @State private var noteOpenError: String? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -1115,28 +1116,31 @@ struct ContentView: View {
         let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
         let hasVideo = hasVideoAsset(for: videoFilename)
 
+        let content: String?
         do {
-            let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let title = HistoryRowFormatting.title(from: content)
-
-            return (
-                entry: HumanEntry(
-                    id: uuid,
-                    date: entryDisplayDate(from: fileDate),
-                    filename: filename,
-                    previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
-                    entryType: hasVideo ? .video : .text,
-                    videoFilename: hasVideo ? videoFilename : nil,
-                    timestamp: fileDate,
-                    searchableBody: hasVideo ? (loadTranscriptText(for: videoFilename) ?? "") : content
-                ),
-                date: fileDate,
-                content: content
-            )
+            content = try String(contentsOf: fileURL, encoding: .utf8)
+        } catch CocoaError.fileReadCorruptFile {
+            content = nil
         } catch {
             print("Error reading file: \(error)")
             return nil
         }
+
+        let title = content.map { HistoryRowFormatting.title(from: $0) } ?? filename
+        return (
+            entry: HumanEntry(
+                id: uuid,
+                date: entryDisplayDate(from: fileDate),
+                filename: filename,
+                previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
+                entryType: hasVideo ? .video : .text,
+                videoFilename: hasVideo ? videoFilename : nil,
+                timestamp: fileDate,
+                searchableBody: hasVideo ? (loadTranscriptText(for: videoFilename) ?? "") : (content ?? "")
+            ),
+            date: fileDate,
+            content: content ?? ""
+        )
     }
 
     /// Builds a HumanEntry for a resolved write target, creating a shell if not yet listed.
@@ -1211,23 +1215,16 @@ struct ContentView: View {
             entries.insert(entry, at: 0)
         }
 
-        isLoadingEntry = true
-        loadEntry(entry: entry)
+        guard loadEntry(entry: entry) else { return false }
 
         if appendSeparator {
             text += DestinationWriteTarget.sessionSeparator()
-            selectedEntryId = entry.id
-            isLoadingEntry = false
             let didSave = saveEntry(entry: entry)
             editorCaretEndRequest = UUID()
             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
             return didSave
-        } else {
-            selectedEntryId = entry.id
-            isLoadingEntry = false
-            if entry.entryType == .text {
-                updatePreviewText(for: entry)
-            }
+        } else if entry.entryType == .text {
+            updatePreviewText(for: entry)
         }
 
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
@@ -1401,10 +1398,7 @@ struct ContentView: View {
             return
         }
 
-        isLoadingEntry = true
-        loadEntry(entry: targetEntry)
-        selectedEntryId = targetEntry.id
-        isLoadingEntry = false
+        guard loadEntry(entry: targetEntry) else { return }
 
         if targetEntry.entryType == .text {
             DispatchQueue.main.async {
@@ -2002,7 +1996,7 @@ struct ContentView: View {
                                 .onTapGesture {
                                     historySearchFocused = false
                                     selectEntry(entry)
-                                    if entry.entryType == .text {
+                                    if selectedEntryId == entry.id, entry.entryType == .text {
                                         historySelectionFocusEntryId = entry.id
                                         historySelectionFocusRequest = UUID()
                                     }
@@ -2088,6 +2082,14 @@ struct ContentView: View {
             Button("OK") { trashError = nil }
         } message: {
             Text(trashError ?? "")
+        }
+        .alert("Couldn't open note", isPresented: Binding(
+            get: { noteOpenError != nil },
+            set: { if !$0 { noteOpenError = nil } }
+        )) {
+            Button("OK") { noteOpenError = nil }
+        } message: {
+            Text(noteOpenError ?? "")
         }
         .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
             newEntry: createNewEntry,
@@ -2308,7 +2310,11 @@ struct ContentView: View {
         }
     }
     
-    private func loadEntry(entry: HumanEntry) {
+    @discardableResult
+    private func loadEntry(entry: HumanEntry) -> Bool {
+        isLoadingEntry = true
+        defer { isLoadingEntry = false }
+
         if let videoFilename = resolvedVideoFilename(for: entry) {
             // Load video entry
             let videoURL = getVideoURL(for: videoFilename)
@@ -2323,33 +2329,27 @@ struct ContentView: View {
                 print("Video file missing for entry: \(videoFilename)")
             }
         } else {
-            // Load text entry
-            currentVideoURL = nil
-            selectedVideoHasTranscript = false
-            didCopyTranscript = false
-            guard let documentsDirectory = getDocumentsDirectory() else {
-                text = ""
-                return
-            }
+            guard let documentsDirectory = getDocumentsDirectory() else { return false }
             let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
             do {
-                if fileManager.fileExists(atPath: fileURL.path) {
-                    let rawText = try String(contentsOf: fileURL, encoding: .utf8)
-                    // Strip legacy leading newlines from older entries
-                    text = String(rawText.drop(while: { $0 == "\n" }))
-                    noteSaveState.didLoad(text, from: fileURL)
-                    print("Successfully loaded entry: \(entry.filename)")
-                } else {
-                    // Soft-fail missing file (e.g. Existing note removed from disk).
-                    text = ""
-                    print("Entry file missing: \(entry.filename)")
-                }
+                text = try noteSaveState.load(from: fileURL)
+                print("Successfully loaded entry: \(entry.filename)")
+            } catch CocoaError.fileReadNoSuchFile {
+                // Soft-fail missing file (e.g. Existing note removed from disk).
+                text = ""
+                print("Entry file missing: \(entry.filename)")
             } catch {
                 print("Error loading entry: \(error)")
-                text = ""
+                noteOpenError = "\(entry.filename)\n\(error.localizedDescription)"
+                return false
             }
+            currentVideoURL = nil
+            selectedVideoHasTranscript = false
+            didCopyTranscript = false
         }
+        selectedEntryId = entry.id
+        return true
     }
     
     private func createNewEntry() {
@@ -2732,12 +2732,8 @@ struct ContentView: View {
 
                 // If the deleted entry was selected, select the first entry or create a new one
                 if selectedEntryId == entry.id {
-                    if let firstEntry = entries.first {
-                        selectedEntryId = firstEntry.id
-                        loadEntry(entry: firstEntry)
-                    } else {
-                        beginFreshCaptureSession(clearText: true)
-                    }
+                    if let firstEntry = entries.first, loadEntry(entry: firstEntry) { return }
+                    beginFreshCaptureSession(clearText: true)
                 }
             }
         } catch {
@@ -2775,10 +2771,7 @@ struct ContentView: View {
                     entries.insert(entry, at: min(trashedEntryIndex, entries.count))
                 }
                 if trashedEntryWasSelected {
-                    isLoadingEntry = true
-                    selectedEntryId = entry.id
                     loadEntry(entry: entry)
-                    isLoadingEntry = false
                 }
             }
             trashedEntry = nil
