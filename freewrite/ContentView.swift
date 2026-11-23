@@ -1024,35 +1024,29 @@ struct ContentView: View {
         saveEntry(entry: entry)
     }
 
-    @discardableResult
-    private func finalizeCaptureSession(keepEditingOnSaveFailure: Bool = false) -> Bool {
-        guard isCapturePerSessionMode else {
-            if let currentId = selectedEntryId,
-               let currentEntry = entries.first(where: { $0.id == currentId }),
-               currentEntry.entryType == .text {
-                saveEntry(entry: currentEntry, updatePreview: false)
-            }
-            return false
-        }
+    private enum CaptureFinalization {
+        case noCapture, saved, failed
+    }
 
-        guard let draftFilename = inProgressCaptureFilename else { return false }
-        guard let documentsDirectory = getDocumentsDirectory() else { return false }
+    private func finalizeCaptureSession() -> CaptureFinalization {
+        guard isCapturePerSessionMode, let draftFilename = inProgressCaptureFilename else { return .noCapture }
+        guard let documentsDirectory = getDocumentsDirectory() else {
+            noteSaveError = draftFilename
+            return .failed
+        }
 
         let trimmed = normalizedCaptureContent(text)
         if trimmed.isEmpty {
             deleteCaptureFileIfExists(draftFilename)
             removeEntry(withFilename: draftFilename)
             beginFreshCaptureSession(clearText: true)
-            return false
+            return .noCapture
         }
 
-        var didSave = false
-        if let entry = entries.first(where: { $0.filename == draftFilename }) {
-            didSave = saveEntry(entry: entry, updatePreview: true)
-            if !didSave, keepEditingOnSaveFailure {
-                noteSaveError = entry.filename
-                return false
-            }
+        guard let entry = entries.first(where: { $0.filename == draftFilename }),
+              saveEntry(entry: entry, updatePreview: true) else {
+            noteSaveError = draftFilename
+            return .failed
         }
 
         let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
@@ -1072,11 +1066,11 @@ struct ContentView: View {
             )
 
             if finalFilename != draftFilename {
-                if moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) {
-                    updateEntryFilename(from: draftFilename, to: finalFilename)
-                } else {
-                    didSave = false
+                guard moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) else {
+                    noteSaveError = draftFilename
+                    return .failed
                 }
+                updateEntryFilename(from: draftFilename, to: finalFilename)
             }
         }
 
@@ -1088,7 +1082,7 @@ struct ContentView: View {
         text = ""
         isLoadingEntry = false
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-        return didSave
+        return .saved
     }
 
     private func entryDisplayDate(from date: Date) -> String {
@@ -1420,8 +1414,7 @@ struct ContentView: View {
 
     private func prepareToLeaveEntry() -> Bool {
         if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            finalizeCaptureSession(keepEditingOnSaveFailure: true)
-            return inProgressCaptureFilename == nil
+            return finalizeCaptureSession() != .failed
         } else if let currentId = selectedEntryId,
                   let currentEntry = entries.first(where: { $0.id == currentId }),
                   currentEntry.entryType == .text,
@@ -1438,9 +1431,6 @@ struct ContentView: View {
     }
 
     private func reloadJournalForActiveDestination() {
-        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            finalizeCaptureSession()
-        }
         selectedEntryId = nil
         currentVideoURL = nil
         selectedVideoHasTranscript = false
@@ -1454,15 +1444,7 @@ struct ContentView: View {
     }
 
     private func switchToDestination(id: UUID) {
-        guard id != destinationStore.activeDestinationId else { return }
-
-        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            finalizeCaptureSession()
-        } else if let currentId = selectedEntryId,
-           let currentEntry = entries.first(where: { $0.id == currentId }),
-           currentEntry.entryType == .text {
-            saveEntry(entry: currentEntry)
-        }
+        guard id != destinationStore.activeDestinationId, prepareToLeaveEntry() else { return }
 
         destinationStore.activateDestination(id: id)
         if showingDestinationSettings {
@@ -2149,7 +2131,11 @@ struct ContentView: View {
             },
             openDestinationSettings: openDestinationSettings
         ))
-        .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
+        .background(WindowTitleAccessor(
+            title: currentEntryTitle,
+            isDark: colorScheme == .dark,
+            prepareToClose: prepareToLeaveEntry
+        ))
         .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
         .onChange(of: selectedEntryId) { _, newId in
             // Drop a History focus request once its note is no longer open, so a later editor can't replay it.
@@ -2166,16 +2152,6 @@ struct ContentView: View {
             showingDestinationSettings = false
             destinationStore.activateDestination(id: destinationStore.activeDestinationId)
             loadExistingEntries()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            finalizeCaptureSession()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
-            guard let window = notification.object as? NSWindow,
-                  window.isKeyWindow || NSApplication.shared.keyWindow == window else {
-                return
-            }
-            finalizeCaptureSession()
         }
         .onChange(of: text) { _ in
             guard !isLoadingEntry else { return }
@@ -2426,7 +2402,9 @@ struct ContentView: View {
             }
             didSave = bindToResolvedWriteTarget(appendSeparator: true)
         } else {
-            didSave = finalizeCaptureSession()
+            let result = finalizeCaptureSession()
+            guard result != .failed else { return }
+            didSave = result == .saved
             beginFreshCaptureSession(clearText: true)
         }
 
@@ -2829,8 +2807,8 @@ struct ContentView: View {
         guard var trash = historyTrash,
               trashDestinationID == destinationStore.activeDestinationId else { return }
         do {
-            if trashedEntryWasSelected, inProgressCaptureFilename != nil {
-                finalizeCaptureSession()
+            if trashedEntryWasSelected, finalizeCaptureSession() == .failed {
+                return
             }
             let restoredURLs = try trash.restore(finalizeCaptureDrafts: true)
             historyTrash = nil

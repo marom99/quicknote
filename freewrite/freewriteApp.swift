@@ -205,24 +205,63 @@ enum WindowChrome {
 struct WindowTitleAccessor: NSViewRepresentable {
     let title: String
     let isDark: Bool
+    let prepareToClose: () -> Bool
 
-    func makeNSView(context: Context) -> NSView {
-        WindowChrome.startObserving()
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window {
-                WindowChrome.update(for: window, title: title, isDark: isDark)
+    final class HostView: NSView {
+        let closeDelegate = EditorWindowCloseDelegate()
+        private weak var attachedWindow: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            attachCloseDelegate()
+        }
+
+        func attachCloseDelegate() {
+            if let attachedWindow, attachedWindow !== window, attachedWindow.delegate === closeDelegate {
+                attachedWindow.delegate = closeDelegate.forwardedDelegate
+            }
+            attachedWindow = window
+            if let window, window.delegate !== closeDelegate {
+                closeDelegate.forwardedDelegate = window.delegate
+                window.delegate = closeDelegate
             }
         }
+    }
+
+    func makeNSView(context: Context) -> HostView {
+        WindowChrome.startObserving()
+        let view = HostView()
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: HostView, context: Context) {
+        nsView.closeDelegate.prepareToClose = prepareToClose
         DispatchQueue.main.async {
             if let window = nsView.window {
+                nsView.attachCloseDelegate()
                 WindowChrome.update(for: window, title: title, isDark: isDark)
             }
         }
+    }
+}
+
+final class EditorWindowCloseDelegate: NSObject, NSWindowDelegate {
+    weak var forwardedDelegate: NSWindowDelegate?
+    var prepareToClose: () -> Bool = { true }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard forwardedDelegate?.windowShouldClose?(sender) != false else { return false }
+        return prepareToClose()
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || forwardedDelegate?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if let forwardedDelegate, forwardedDelegate.responds(to: selector) { return forwardedDelegate }
+        return super.forwardingTarget(for: selector)
     }
 }
 
@@ -270,6 +309,18 @@ struct freewriteApp: App {
 // Add AppDelegate to handle window configuration
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalHotKey: GlobalHotKey?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for window in sender.windows {
+            if let delegate = window.delegate as? EditorWindowCloseDelegate, !delegate.prepareToClose() {
+                sender.activate(ignoringOtherApps: true)
+                window.deminiaturize(nil)
+                window.makeKeyAndOrderFront(nil)
+                return .terminateCancel
+            }
+        }
+        return .terminateNow
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         globalHotKey = GlobalHotKey {
