@@ -67,7 +67,9 @@ freewrite/
 ├── freewrite/
 │   ├── freewriteApp.swift        # App entry point
 │   ├── ContentView.swift         # Main view (1400+ lines)
-│   ├── QuickCapture.swift        # Carbon hotkey + menu-bar capture routing
+│   ├── QuickCapture.swift        # Carbon hotkey, shortcut settings, and capture routing
+│   ├── CapturePanel.swift        # Nonactivating AppKit capture panel
+│   ├── CaptureDraft.swift        # Local draft recovery and destination writes
 │   ├── DestinationStore.swift    # Named destinations + save modes
 │   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
 │   ├── VideoPlayerView.swift     # Video playback interface
@@ -257,11 +259,11 @@ struct VideoPlayerView: View {
 
 ## Quick capture (global hotkey + menu bar)
 
-- ⌃⌥⌘N uses Carbon hotkey registration (no Accessibility permission); the menu-bar pencil also offers Quick Capture, Show Window, and Quit.
-- Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
-- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor.
-- `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
-- Before capture, native editor input is suspended and first responder resigned; capture runs before raising the window. Input resumes only after the SwiftUI editor update applies the new capture text, preventing immediate typing from copying stale native text into the new note.
+- While Quick Note is running, ⌃⌥⌘N or **Quick Capture** in the menu-bar pencil opens a focused, nonactivating AppKit panel in the current Space. **Show Window** still opens or raises the regular editor without starting a capture.
+- **Capture Shortcut…** in the menu bar records a replacement for the Carbon hotkey (no Accessibility permission). Unavailable shortcuts are reported in the recorder or menu; a rejected replacement keeps the previous working key.
+- The panel snapshots the active destination and session start date, and atomically keeps edits in one app-local Application Support draft. Esc or Done saves the draft as a uniquely named Markdown file or appends one timestamped session to the original Rolling / Existing note. Blank captures never write to the destination.
+- A failed save leaves the text in the panel for retry. **Keep Draft** (or Esc after being offered that choice) closes without losing the local copy, which reopens on the next capture even after relaunch. The pending write stores content digests so an interrupted commit doesn't append the same session twice or overwrite a changed target during recovery.
+- The main editor and capture are independent. On save, matching main windows update History and refresh an open, clean copy of the same note; unsaved text in that note blocks panel writes.
 
 ## Entry Loading Logic
 

@@ -1,0 +1,178 @@
+import CryptoKit
+import Foundation
+import Testing
+@testable import freewrite
+
+struct CaptureDraftTests {
+    private struct Fixture {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        var destination: URL { root.appendingPathComponent("Destination") }
+        var store: CaptureDraftStore { .init(url: root.appendingPathComponent("Recovery/Draft.json")) }
+
+        init() throws {
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        }
+
+        func cleanUp() { try? FileManager.default.removeItem(at: root) }
+
+        func draft(_ mode: DestinationSaveMode, format: NewNoteFilenameFormat = .date) -> CaptureDraft {
+            CaptureDraft(destination: .init(id: UUID(), displayName: "Original", isDefault: true, saveMode: mode,
+                                             newNoteFilenameFormat: format, existingNoteFilename: "Keep.md"),
+                         startedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        }
+
+        func target(for draft: CaptureDraft) throws -> URL {
+            if draft.destination.saveMode == .existing { return destination.appendingPathComponent("Keep.md") }
+            return try #require(DestinationWriteTarget.resolve(for: draft.destination, documentsURL: destination,
+                                now: draft.startedAt, createIfMissing: false)?.fileURL)
+        }
+    }
+
+    @Test(arguments: DestinationSaveMode.allCases)
+    func blankCaptureDoesNotWriteOrAppend(mode: DestinationSaveMode) throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(mode)
+        let existing = f.destination.appendingPathComponent("Keep.md")
+        try "Previous".write(to: existing, atomically: true, encoding: .utf8)
+        draft.text = " \n\t"
+        try f.store.preserve(draft)
+
+        #expect(try f.store.save(&draft, in: f.destination) == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: f.destination.path) == ["Keep.md"])
+        #expect(try String(contentsOf: existing, encoding: .utf8) == "Previous")
+        #expect(try f.store.load() == nil)
+    }
+
+    @Test func titleCaptureCreatesAUniqueMarkdownFile() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        let existing = f.destination.appendingPathComponent("Launch ideas.md")
+        try "Other note".write(to: existing, atomically: true, encoding: .utf8)
+        var draft = f.draft(.newNote, format: .title)
+        draft.text = "Launch ideas\n\nSecond paragraph"
+
+        let url = try #require(f.store.save(&draft, in: f.destination))
+
+        #expect(url.lastPathComponent == "Launch ideas-2.md")
+        #expect(try String(contentsOf: url, encoding: .utf8) == draft.text)
+        #expect(try String(contentsOf: existing, encoding: .utf8) == "Other note")
+        #expect(try f.store.load() == nil)
+    }
+
+    @Test func dateCaptureUsesTheSessionDate() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.newNote)
+        draft.text = "A dated thought"
+
+        let url = try #require(f.store.save(&draft, in: f.destination))
+
+        #expect(url.lastPathComponent == DestinationWriteTarget.dateCaptureBasename(now: draft.startedAt) + ".md")
+        #expect(try String(contentsOf: url, encoding: .utf8) == draft.text)
+    }
+
+    @Test(arguments: [DestinationSaveMode.rolling, .existing])
+    func appendPreservesTheLatestDestinationText(mode: DestinationSaveMode) throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(mode)
+        draft.text = "Captured"
+        try f.store.preserve(draft)
+        let file = try f.target(for: draft)
+        let before = "Original\nEdited in another app\n"
+        try before.write(to: file, atomically: true, encoding: .utf8)
+
+        #expect(try f.store.save(&draft, in: f.destination) == file)
+        #expect(try String(contentsOf: file, encoding: .utf8) == before + draft.separator + draft.text)
+    }
+
+    @Test func rollingCreatesMissingFileOnlyOnNonemptySave() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.rolling)
+        draft.text = "Captured"
+        let file = try f.target(for: draft)
+
+        #expect(try f.store.save(&draft, in: f.destination) == file)
+        #expect(try String(contentsOf: file, encoding: .utf8) == draft.separator + draft.text)
+    }
+
+    @Test func missingDestinationLeavesDraftForRetryInTheOriginalDestination() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.newNote)
+        draft.text = "Do not lose this"
+        try f.store.preserve(draft)
+        try FileManager.default.removeItem(at: f.destination)
+
+        #expect(throws: CaptureDraftStore.SaveError.unavailable) {
+            try f.store.save(&draft, in: f.destination)
+        }
+
+        var recovered = try #require(CaptureDraftStore(url: f.store.url).load())
+        #expect(recovered == draft)
+        try FileManager.default.createDirectory(at: f.destination, withIntermediateDirectories: false)
+        let url = try #require(f.store.save(&recovered, in: f.destination))
+        #expect(try String(contentsOf: url, encoding: .utf8) == draft.text)
+    }
+
+    @Test func leavesUnreadableNoteAndUnsavedEditorIntact() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.existing)
+        draft.text = "Not in the original file"
+        let file = try f.target(for: draft)
+        let bytes = Data([0xFF, 0xFE, 0xFF])
+        try bytes.write(to: file)
+
+        #expect(throws: CaptureDraftStore.SaveError.invalidText) {
+            try f.store.save(&draft, in: f.destination)
+        }
+        #expect(try Data(contentsOf: file) == bytes)
+
+        try "Previous".write(to: file, atomically: true, encoding: .utf8)
+        #expect(throws: CaptureDraftStore.SaveError.unsavedEditor) {
+            try f.store.save(&draft, in: f.destination, canWrite: { _ in false })
+        }
+        #expect(try String(contentsOf: file, encoding: .utf8) == "Previous")
+    }
+
+    @Test func completedAppendIsNotRepeatedWhenRecoveringAfterAnInterruption() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.existing)
+        draft.text = "Captured"
+        let file = try f.target(for: draft)
+        let previous = Data("Original".utf8)
+        let output = previous + Data((draft.separator + draft.text).utf8)
+        draft.pendingWrite = .init(filename: file.lastPathComponent, previousDigest: Data(SHA256.hash(data: previous)),
+                                   savedDigest: Data(SHA256.hash(data: output)))
+        try f.store.preserve(draft)
+        try output.write(to: file)
+
+        var recovered = try #require(f.store.load())
+        #expect(try f.store.save(&recovered, in: f.destination) == file)
+        #expect(try Data(contentsOf: file) == output)
+        #expect(try f.store.load() == nil)
+    }
+
+    @Test func recoveryWillNotOverwriteAFileChangedDuringAnInterruptedWrite() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.existing)
+        draft.text = "Captured"
+        let file = try f.target(for: draft)
+        draft.pendingWrite = .init(filename: file.lastPathComponent,
+                                   previousDigest: Data(SHA256.hash(data: Data("Before".utf8))),
+                                   savedDigest: Data(SHA256.hash(data: Data("After".utf8))))
+        try f.store.preserve(draft)
+        try "Other app’s edits".write(to: file, atomically: true, encoding: .utf8)
+
+        #expect(throws: CaptureDraftStore.SaveError.changedTarget) {
+            try f.store.save(&draft, in: f.destination)
+        }
+        #expect(try f.store.load() == draft)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "Other app’s edits")
+    }
+}
