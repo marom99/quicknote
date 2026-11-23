@@ -1,6 +1,6 @@
 ---
 name: Quick Note
-description: A distraction-free, local-first writing and video journaling app for macOS.
+description: A distraction-free, local-first writing app for macOS with playback of existing video notes.
 colors:
   ink: "#333333"
   ink-soft: "#E6E6E6"
@@ -86,7 +86,7 @@ components:
 
 **Creative North Star: "The Quiet Page"**
 
-Quick Note's visual system is built to vanish. The product is a distraction-free writing environment — the point is that nothing on screen competes with the words (or the video) being captured. The interface reads as a nearly empty page: white in light mode, black in dark mode, with typography and whitespace carrying all the identity. There is no accent color; there is no decorative chrome; there is no competing structure. Calm, minimal, and human — the design whispers so the writing can speak.
+Quick Note's visual system is built to vanish. The product is a distraction-free writing environment — the point is that nothing on screen competes with the writing or an existing video being played. The interface reads as a nearly empty page: white in light mode, black in dark mode, with typography and whitespace carrying all the identity. There is no accent color; there is no decorative chrome; there is no competing structure. Calm, minimal, and human — the design whispers so the writing can speak.
 
 Density is deliberately low. The editor fills the window behind a fixed 18px page inset, so the page feels open at any window size; scroll content keeps an 8px gap above the floating navigation so the last line never touches its border. The bottom navigation itself is a quiet, always-visible strip of gray text that darkens on hover, with 12px padding above and below the controls. The native title bar mirrors the same paper/night fill and carries a matching 1px muted rule at its bottom edge. Surfaces are flat at rest; the only depth is a whisper of shadow on popovers, and it appears only when a menu must float above the page.
 

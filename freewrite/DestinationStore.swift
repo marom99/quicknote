@@ -215,30 +215,6 @@ final class DestinationStore: ObservableObject {
         return videosURL
     }
 
-    func resolveDocumentsURL(for destination: SaveDestination, fileManager: FileManager = .default) -> URL? {
-        if destination.id == activeDestinationId, let cachedDocumentsURL {
-            ensureDirectoryExists(at: cachedDocumentsURL, fileManager: fileManager)
-            return cachedDocumentsURL
-        }
-
-        switch resolveAccess(for: destination, fileManager: fileManager) {
-        case .accessible(let url):
-            ensureDirectoryExists(at: url, fileManager: fileManager)
-            return url
-        case .softFailure:
-            return nil
-        }
-    }
-
-    func resolveVideosURL(for destination: SaveDestination, fileManager: FileManager = .default) -> URL? {
-        guard let documentsURL = resolveDocumentsURL(for: destination, fileManager: fileManager) else {
-            return nil
-        }
-        let videosURL = documentsURL.appendingPathComponent("Videos", isDirectory: true)
-        ensureDirectoryExists(at: videosURL, fileManager: fileManager)
-        return videosURL
-    }
-
     @discardableResult
     func activateDestination(id: UUID, fileManager: FileManager = .default) -> DestinationAccessResult {
         guard destinations.contains(where: { $0.id == id }) else {

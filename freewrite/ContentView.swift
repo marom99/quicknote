@@ -24,34 +24,6 @@ struct HumanEntry: Identifiable {
     var videoFilename: String?
     var timestamp: Date? = nil
     var searchableBody: String = ""
-
-    static func createNew() -> HumanEntry {
-        let id = UUID()
-        let now = Date()
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        let dateString = dateFormatter.string(from: now)
-
-        // For display
-        dateFormatter.dateFormat = "MMM d"
-        let displayDate = dateFormatter.string(from: now)
-
-        return HumanEntry(
-            id: id,
-            date: displayDate,
-            filename: "[\(id)]-[\(dateString)].md",
-            previewText: "",
-            entryType: .text,
-            videoFilename: nil,
-            timestamp: now
-        )
-    }
-}
-
-struct HeartEmoji: Identifiable {
-    let id = UUID()
-    var position: CGPoint
-    var offset: CGFloat = 0
 }
 
 struct EditorScrollMetrics: Equatable {
@@ -565,7 +537,6 @@ struct ContentView: View {
     @State private var didCopyTranscript: Bool = false
     @State private var selectedVideoHasTranscript = false
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
-    let entryHeight: CGFloat = 40
     private let editorInset: CGFloat = 18
     // NSTextView line-fragment padding (horizontal only; top inset is 0).
     private let editorNativeTextPadding: CGFloat = 5
@@ -586,9 +557,7 @@ struct ContentView: View {
         "Just say it"
     ]
     
-    // Add file manager and save timer
     private let fileManager = FileManager.default
-    private let saveTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     private let thumbnailMemoryCache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
@@ -759,42 +728,6 @@ struct ContentView: View {
         return generated
     }
 
-    private func deleteVideoAssets(for videoFilename: String) {
-        thumbnailMemoryCache.removeObject(forKey: videoFilename as NSString)
-
-        var candidateURLs: [URL] = []
-        var managedDirectory: URL?
-        if let directory = getVideoEntryDirectory(for: videoFilename) {
-            managedDirectory = directory
-            candidateURLs.append(directory.appendingPathComponent(videoFilename))
-            candidateURLs.append(directory.appendingPathComponent("thumbnail.jpg"))
-            candidateURLs.append(directory.appendingPathComponent("transcript.md"))
-        }
-        if let videosDirectory = getVideosDirectory() {
-            candidateURLs.append(videosDirectory.appendingPathComponent(videoFilename))
-        }
-        if let documentsDirectory = getDocumentsDirectory() {
-            candidateURLs.append(documentsDirectory.appendingPathComponent(videoFilename))
-        }
-
-        for url in candidateURLs where fileManager.fileExists(atPath: url.path) {
-            do {
-                try fileManager.removeItem(at: url)
-            } catch {
-                print("Error deleting video asset \(url.lastPathComponent): \(error)")
-            }
-        }
-
-        if let managedDirectory,
-           fileManager.fileExists(atPath: managedDirectory.path) {
-            do {
-                try fileManager.removeItem(at: managedDirectory)
-            } catch {
-                print("Error deleting video entry directory: \(error)")
-            }
-        }
-    }
-
     private func loadTranscriptText(for videoFilename: String) -> String? {
         guard let transcriptURL = getVideoTranscriptURL(for: videoFilename),
               fileManager.fileExists(atPath: transcriptURL.path),
@@ -880,28 +813,8 @@ struct ContentView: View {
         return (uuid: uuid, timestamp: timestamp)
     }
     
-    private func isEntryNewer(_ lhs: HumanEntry, than rhs: HumanEntry) -> Bool {
-        let lhsTimestamp = parseCanonicalEntryFilename(lhs.filename)?.timestamp ?? .distantPast
-        let rhsTimestamp = parseCanonicalEntryFilename(rhs.filename)?.timestamp ?? .distantPast
-        if lhsTimestamp == rhsTimestamp {
-            return lhs.filename > rhs.filename
-        }
-        return lhsTimestamp > rhsTimestamp
-    }
-    
-    private func isEntryFromToday(_ entry: HumanEntry, calendar: Calendar = .current, today: Date = Date()) -> Bool {
-        guard let timestamp = parseCanonicalEntryFilename(entry.filename)?.timestamp else {
-            return false
-        }
-        return calendar.isDate(timestamp, inSameDayAs: today)
-    }
-
     private var activeSaveMode: DestinationSaveMode {
         destinationStore.activeDestination?.saveMode ?? .newNote
-    }
-
-    private var listsAllRootMarkdown: Bool {
-        activeSaveMode == .rolling || activeSaveMode == .existing || activeSaveMode == .newNote
     }
 
     private var isCapturePerSessionMode: Bool {
@@ -1148,18 +1061,10 @@ struct ContentView: View {
     }
 
     private func humanEntry(
-        from fileURL: URL,
-        allowNonCanonical: Bool
+        from fileURL: URL
     ) -> (entry: HumanEntry, date: Date, content: String)? {
         let filename = fileURL.lastPathComponent
         let parsed = parseCanonicalEntryFilename(filename)
-
-        if !allowNonCanonical {
-            guard let parsed else {
-                print("Skipping non-canonical entry filename: \(filename)")
-                return nil
-            }
-        }
 
         let uuid: UUID
         let fileDate: Date
@@ -1436,42 +1341,6 @@ struct ContentView: View {
         }
     }
     
-    // Add function to save text
-    private func saveText() {
-        guard let documentsDirectory = getDocumentsDirectory() else { return }
-        let fileURL = documentsDirectory.appendingPathComponent("entry.md")
-        
-        print("Attempting to save file to: \(fileURL.path)")
-        
-        do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("Successfully saved file")
-        } catch {
-            print("Error saving file: \(error)")
-            print("Error details: \(error.localizedDescription)")
-        }
-    }
-    
-    // Add function to load text
-    private func loadText() {
-        guard let documentsDirectory = getDocumentsDirectory() else { return }
-        let fileURL = documentsDirectory.appendingPathComponent("entry.md")
-        
-        print("Attempting to load file from: \(fileURL.path)")
-        
-        do {
-            if fileManager.fileExists(atPath: fileURL.path) {
-                text = try String(contentsOf: fileURL, encoding: .utf8)
-                print("Successfully loaded file")
-            } else {
-                print("File does not exist yet")
-            }
-        } catch {
-            print("Error loading file: \(error)")
-            print("Error details: \(error.localizedDescription)")
-        }
-    }
-    
     private func selectEntry(_ entry: HumanEntry) {
         guard selectedEntryId != entry.id else { return }
 
@@ -1607,12 +1476,9 @@ struct ContentView: View {
 
             print("Found \(mdFiles.count) .md files")
 
-            let allowNonCanonical = listsAllRootMarkdown
-
-            // Process each file (canonical-only for New note; all root .md for Rolling/Existing)
             let entriesWithDates = mdFiles.compactMap { fileURL -> (entry: HumanEntry, date: Date, content: String)? in
                 print("Processing: \(fileURL.lastPathComponent)")
-                return humanEntry(from: fileURL, allowNonCanonical: allowNonCanonical)
+                return humanEntry(from: fileURL)
             }
             
             // Sort and extract entries - store in temporary variable
@@ -2831,7 +2697,7 @@ struct ContentView: View {
             if let draft = trashedEntry,
                DestinationWriteTarget.isCaptureDraftFilename(draft.filename),
                let url = restoredURLs.first(where: { $0.pathExtension == "md" }) {
-                restoredEntry = humanEntry(from: url, allowNonCanonical: true)?.entry
+                restoredEntry = humanEntry(from: url)?.entry
             }
             if let entry = restoredEntry {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
