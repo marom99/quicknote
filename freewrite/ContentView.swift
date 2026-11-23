@@ -2475,18 +2475,21 @@ struct ContentView: View {
                 && CaptureDraftStore.sameFile(directory.appendingPathComponent($0.filename), url)
         }
         let actualURL = directory.appendingPathComponent(index.map { entries[$0].filename } ?? url.lastPathComponent)
-        guard let updated = humanEntry(from: actualURL) else { return }
-        if let selected = entries.first(where: { $0.id == selectedEntryId }), selected.entryType == .text {
+        guard let updated = HistoryEntryReader(directory: directory).entry(
+            at: actualURL, includeUnreadable: false
+        ) else { return }
+        if updated.entryType == .text,
+           let selected = entries.first(where: { $0.id == selectedEntryId }), selected.entryType == .text {
             let selectedURL = directory.appendingPathComponent(selected.filename)
             if CaptureDraftStore.sameFile(selectedURL, url), !noteSaveState.hasUnsavedChanges(text, at: selectedURL) {
-                text = updated.content
+                text = updated.searchableBody
                 noteSaveState.didLoad(text, from: selectedURL)
             }
         }
         if let index {
-            entries[index] = updated.entry
+            entries[index] = updated
         } else {
-            entries.insert(updated.entry, at: 0)
+            entries.insert(updated, at: 0)
         }
     }
 
