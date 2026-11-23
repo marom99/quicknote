@@ -16,8 +16,14 @@ struct CaptureHotKey: Codable, Equatable {
         self.keyLabel = keyLabel
     }
 
-    init?(event: NSEvent) {
-        guard !event.modifierFlags.intersection(Self.requiredModifiers).isEmpty else { return nil }
+    init?(event: NSEvent, modifiers: NSEvent.ModifierFlags? = nil) {
+        let modifiers = modifiers ?? event.modifierFlags
+        guard !modifiers.intersection(Self.requiredModifiers).isEmpty else { return nil }
+        guard let label = Self.keyLabel(for: event) else { return nil }
+        self.init(keyCode: UInt32(event.keyCode), modifiers: modifiers, keyLabel: label)
+    }
+
+    private static func keyLabel(for event: NSEvent) -> String? {
         let label: String
         switch Int(event.keyCode) {
         case kVK_Space: label = "Space"
@@ -37,13 +43,13 @@ struct CaptureHotKey: Codable, Equatable {
                   }) else { return nil }
             label = characters.uppercased()
         }
-        self.init(keyCode: UInt32(event.keyCode), modifiers: event.modifierFlags, keyLabel: label)
+        return label
     }
 
     static let standard = CaptureHotKey(keyCode: UInt32(kVK_ANSI_N),
                                         modifiers: [.control, .option, .command], keyLabel: "N")
 
-    private var modifiers: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifierBits) }
+    fileprivate var modifiers: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifierBits) }
 
     func matches(_ other: Self) -> Bool { keyCode == other.keyCode && modifierBits == other.modifierBits }
 
@@ -162,10 +168,11 @@ final class CaptureShortcutSettings: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "Capture Shortcut"
-        alert.informativeText = "Press a key with Control, Option, or Command. The shortcut works while Quick Note is running."
+        alert.informativeText = "Press a key with Control, Option, or Command. If the combination doesn’t respond, use Choose Keys to check whether it’s available."
         let close = alert.addButton(withTitle: "Done")
         close.keyEquivalent = "\r"
         alert.addButton(withTitle: "Use Default")
+        alert.addButton(withTitle: "Choose Keys…")
 
         let status = NSTextField(wrappingLabelWithString: "")
         status.frame = NSRect(x: 0, y: 0, width: 260, height: 48)
@@ -177,8 +184,16 @@ final class CaptureShortcutSettings: ObservableObject {
         }
         showCurrent()
 
-        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === alert.window else { return event }
+        func apply(_ candidate: CaptureHotKey) {
+            if setShortcut(candidate) {
+                showCurrent()
+            } else {
+                status.stringValue = "\(candidate.displayString) is unavailable. Try another shortcut."
+            }
+        }
+
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.window === alert.window else { return event }
             if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
                 if Int(event.keyCode) == kVK_Escape {
                     NSApp.stopModal()
@@ -191,23 +206,78 @@ final class CaptureShortcutSettings: ObservableObject {
                 status.stringValue = "Choose a key with Control, Option, or Command."
                 return nil
             }
-            if self.setShortcut(candidate) {
-                showCurrent()
-            } else {
-                status.stringValue = "\(candidate.displayString) is unavailable. Try another shortcut."
-            }
+            apply(candidate)
             return nil
         }
         defer { if let monitor { NSEvent.removeMonitor(monitor) } }
         NSApp.activate()
-        while alert.runModal() == .alertSecondButtonReturn {
-            if setShortcut(.standard) {
-                showCurrent()
-            } else {
-                status.stringValue = "\(CaptureHotKey.standard.displayString) is unavailable. Try another shortcut."
+        while true {
+            switch alert.runModal() {
+            case .alertSecondButtonReturn:
+                apply(.standard)
+            case .alertThirdButtonReturn:
+                alert.window.orderOut(nil)
+                if let candidate = chooseKeys() { apply(candidate) }
+            default:
+                alert.window.orderOut(nil)
+                return
             }
         }
-        alert.window.orderOut(nil)
+    }
+
+    private func chooseKeys() -> CaptureHotKey? {
+        let alert = NSAlert()
+        alert.messageText = "Choose Shortcut Keys"
+        alert.informativeText = "Select the modifiers, then press the letter or number by itself."
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+
+        let choices: [(String, NSEvent.ModifierFlags)] = [
+            ("Control", .control), ("Option", .option), ("Shift", .shift), ("Command", .command),
+        ]
+        let buttons = choices.map { title, flag in
+            let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            button.state = shortcut.modifiers.contains(flag) ? .on : .off
+            return button
+        }
+        let modifiers = NSStackView(views: buttons)
+        var keyCode = shortcut.keyCode
+        var keyLabel = shortcut.keyLabel
+        let key = NSTextField(labelWithString: "Key: \(keyLabel)")
+        let status = NSTextField(labelWithString: "")
+        let rows = NSStackView(views: [modifiers, key, status])
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.frame.size = rows.fittingSize
+        alert.accessoryView = rows
+
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.window === alert.window,
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  let candidate = CaptureHotKey(event: event, modifiers: .control),
+                  candidate.keyLabel.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains) else {
+                return event
+            }
+            keyCode = candidate.keyCode
+            keyLabel = candidate.keyLabel
+            key.stringValue = "Key: \(keyLabel)"
+            return nil
+        }
+        defer {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            alert.window.orderOut(nil)
+        }
+        while alert.runModal() == .alertFirstButtonReturn {
+            var flags: NSEvent.ModifierFlags = []
+            for ((_, flag), button) in zip(choices, buttons) where button.state == .on {
+                flags.insert(flag)
+            }
+            if !flags.intersection([.control, .option, .command]).isEmpty {
+                return CaptureHotKey(keyCode: keyCode, modifiers: flags, keyLabel: keyLabel)
+            }
+            status.stringValue = "Select Control, Option, or Command."
+        }
+        return nil
     }
 }
 
