@@ -330,6 +330,12 @@ enum DestinationWriteTarget {
 
     // MARK: - Resolve write target
 
+    static func validateSettingsTarget(_ target: ResolvedTarget) throws {
+        if target.fileExists {
+            _ = try String(contentsOf: target.fileURL, encoding: .utf8)
+        }
+    }
+
     static func contentForUnboundEdit(_ content: String, target: ResolvedTarget) throws -> String {
         let existing = try String(contentsOf: target.fileURL, encoding: .utf8)
         guard !existing.isEmpty else { return content }

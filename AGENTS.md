@@ -274,6 +274,8 @@ On app launch or destination reload:
 5. Rolling / Existing bind the editor to their resolved write target.
 6. New note clears selection and presents a fresh, unbound canvas. It does not create a file until the user types non-whitespace content.
 
+Markdown that cannot be decoded as UTF-8 appears in History by filename. Failing to read a note shows an alert and does not bind the editor to it. If a configured Rolling / Existing note fails to open and no other note is selected, the canvas shows a message instead of accepting edits that cannot be saved.
+
 ## Auto-Save Behavior
 
 Text is auto-saved on every change. Routing depends on editor state:
@@ -288,7 +290,7 @@ Text is auto-saved on every change. Routing depends on editor state:
 
 The selected-entry check must precede starting a capture so historical edits—including clearing a note—persist to the selected file rather than creating a duplicate.
 
-`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged. Simultaneous local and external edits still use the local edit; this is not conflict merging. Opening or leaving a History note without editing does not change its modification time. Non-canonical History rows display that time.
+`NoteSaveState` tracks the last loaded/saved editor content by file URL. All `saveEntry` paths (including termination) write only when that content changed locally; otherwise they read the disk content back into the editor. Loaded legacy newline normalization is recorded as the baseline, not treated as a user edit. Failed reads/writes leave the baseline unchanged, and a changed edit can create a missing file but cannot replace an unreadable file. Simultaneous local and external edits still use the local edit when the file is readable; this is not conflict merging. Opening or leaving a History note without editing does not change its modification time. Non-canonical History rows display that time.
 
 An unbound Rolling / Existing canvas resolves and creates its configured target on the next non-whitespace edit, then binds and saves that edit without reloading the editor. Deleting the last selected History entry clears the canvas without recreating the file or appending a separator; typing again recreates the current period's file / configured Existing note. Empty edits do not recreate deleted files. Missing Existing notes on launch remain unbound until typing or picking a note.
 
