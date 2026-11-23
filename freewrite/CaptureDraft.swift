@@ -63,7 +63,7 @@ struct CaptureDraftStore {
     }
 
     enum SaveError: LocalizedError, Equatable {
-        case unavailable, missingTarget, changedTarget, unsavedEditor, invalidText
+        case unavailable, missingTarget, changedTarget, unsavedEditor, invalidText, videoTarget
         case partialAppend(Data)
 
         var errorDescription: String? {
@@ -73,6 +73,7 @@ struct CaptureDraftStore {
             case .changedTarget: "The note changed during the save. Copy your draft to keep both versions."
             case .unsavedEditor: "The same note has unsaved edits in the main window."
             case .invalidText: "The original note isn’t UTF-8 text."
+            case .videoTarget: "The destination points to a video note, not a text note."
             case .partialAppend: "The capture is incomplete in the note. Resume Append adds the missing text."
             }
         }
@@ -155,6 +156,8 @@ struct CaptureDraftStore {
         }
         if mode == .existing && original == nil { throw SaveError.missingTarget }
         if mode == .newNote && original != nil { throw SaveError.changedTarget }
+        guard DestinationWriteTarget.videoAssetFilename(forNote: filename, in: directory, fileManager: fileManager) == nil
+        else { throw SaveError.videoTarget }
         guard canWrite(target) else { throw SaveError.unsavedEditor }
 
         if appendedBytes == 0, let original, String(data: original, encoding: .utf8) == nil {

@@ -117,6 +117,25 @@ struct CaptureDraftTests {
         #expect(try String(contentsOf: alias, encoding: .utf8) == "Original" + draft.separator + draft.text)
     }
 
+    @Test func existingVideoTargetKeepsCaptureDraftWithoutChangingMetadata() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = CaptureDraft(destination: .init(id: UUID(), displayName: "Original", isDefault: true,
+                                                     saveMode: .existing, existingNoteFilename: "Keep.MD"),
+                                 startedAt: Date())
+        draft.text = "Captured"
+        try f.store.preserve(draft)
+        let metadata = f.destination.appendingPathComponent("Keep.MD")
+        try "Video Entry".write(to: metadata, atomically: true, encoding: .utf8)
+        try Data().write(to: f.destination.appendingPathComponent("Keep.mov"))
+
+        #expect(throws: CaptureDraftStore.SaveError.videoTarget) {
+            try f.store.save(&draft, in: f.destination)
+        }
+        #expect(try String(contentsOf: metadata, encoding: .utf8) == "Video Entry")
+        #expect(try f.store.load()?.text == "Captured")
+    }
+
     @Test func rollingCreatesMissingFileOnlyOnNonemptySave() throws {
         let f = try Fixture()
         defer { f.cleanUp() }

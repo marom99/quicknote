@@ -26,14 +26,14 @@ struct HistoryEntryReader {
             return nil
         }
         let date = Self.canonicalTimestamp(for: filename) ?? Self.modificationDate(for: url, fileManager: fileManager)
-        let videoFilename = url.deletingPathExtension().lastPathComponent + ".mov"
+        let videoFilename = DestinationWriteTarget.videoAssetFilename(
+            forNote: filename, in: directory, fileManager: fileManager
+        )
         let videoDirectory = directory.appendingPathComponent("Videos", isDirectory: true)
         let videoEntryDirectory = videoDirectory.appendingPathComponent(
-            (videoFilename as NSString).deletingPathExtension, isDirectory: true
+            url.deletingPathExtension().lastPathComponent, isDirectory: true
         )
-        let hasVideo = [videoEntryDirectory, videoDirectory, directory].contains {
-            fileManager.fileExists(atPath: $0.appendingPathComponent(videoFilename).path)
-        }
+        let hasVideo = videoFilename != nil
         let transcript = hasVideo ? try? String(
             contentsOf: videoEntryDirectory.appendingPathComponent("transcript.md"), encoding: .utf8
         ) : nil
@@ -44,7 +44,7 @@ struct HistoryEntryReader {
             filename: filename,
             previewText: hasVideo ? Self.videoTitle(from: transcript) : body.map(HistoryRowFormatting.title(from:)) ?? filename,
             entryType: hasVideo ? .video : .text,
-            videoFilename: hasVideo ? videoFilename : nil,
+            videoFilename: videoFilename,
             timestamp: date,
             searchableBody: hasVideo ? (transcript ?? "") : (body ?? "")
         )
