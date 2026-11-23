@@ -1234,29 +1234,30 @@ struct ContentView: View {
         guard let destination = destinationStore.activeDestination else { return false }
         let draftDisplayName = settingsDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedDisplayName = destination.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let draftFilenameFormat = settingsFilenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draftFilenameFormat = effectiveSettingsFilenameFormat(for: destination)
         let savedFilenameFormat = destination.filenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return (!draftDisplayName.isEmpty && draftDisplayName != savedDisplayName)
             || settingsSaveMode != destination.saveMode
             || settingsRollingPeriod != destination.rollingPeriod
-            || (!draftFilenameFormat.isEmpty && draftFilenameFormat != savedFilenameFormat)
+            || draftFilenameFormat.trimmingCharacters(in: .whitespacesAndNewlines) != savedFilenameFormat
             || settingsNewNoteFilenameFormat != destination.newNoteFilenameFormat
             || settingsExistingNoteFilename != destination.existingNoteFilename
     }
 
-    private var isDestinationSettingsDraftValid: Bool {
-        if settingsSaveMode == .rolling {
-            return DestinationWriteTarget.formattedBasename(
-                format: settingsFilenameFormat,
-                period: settingsRollingPeriod
-            ) != nil
-        }
-        return true
+    private var settingsRollingFilenamePreview: String? {
+        DestinationWriteTarget.formattedBasename(
+            format: settingsFilenameFormat,
+            period: settingsRollingPeriod
+        )
+    }
+
+    private func effectiveSettingsFilenameFormat(for destination: SaveDestination) -> String {
+        settingsRollingFilenamePreview == nil ? destination.filenameFormat : settingsFilenameFormat
     }
 
     private var canSaveDestinationSettings: Bool {
-        hasUnsavedDestinationSettingsChanges && isDestinationSettingsDraftValid
+        hasUnsavedDestinationSettingsChanges && (settingsSaveMode != .rolling || settingsRollingFilenamePreview != nil)
     }
 
     private func closeDestinationSettingsRail() {
@@ -1328,7 +1329,7 @@ struct ContentView: View {
             displayName: settingsDisplayName,
             saveMode: settingsSaveMode,
             rollingPeriod: settingsRollingPeriod,
-            filenameFormat: settingsFilenameFormat,
+            filenameFormat: effectiveSettingsFilenameFormat(for: destination),
             newNoteFilenameFormat: settingsNewNoteFilenameFormat,
             existingNoteFilename: .some(settingsExistingNoteFilename)
         )
@@ -2465,10 +2466,7 @@ struct ContentView: View {
                                 .foregroundColor(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            if let preview = DestinationWriteTarget.formattedBasename(
-                                format: settingsFilenameFormat,
-                                period: currentPeriod
-                            ) {
+                            if let preview = settingsRollingFilenamePreview {
                                 Text("Today → \(preview).md")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)

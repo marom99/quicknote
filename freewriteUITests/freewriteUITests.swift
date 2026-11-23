@@ -90,6 +90,56 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenInvalidRollingFormatDoesNotEnableSaveOrPersist() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let save = app.buttons["Save"]
+        let rolling = app.buttons["Rolling"]
+        let newNote = app.buttons["New note"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let name = app.textFields["Display name"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.isEnabled)
+        let originalName = try XCTUnwrap(name.value as? String)
+
+        rolling.click()
+        XCTAssertTrue(format.waitForExistence(timeout: 5))
+        let savedFormat = try XCTUnwrap(format.value as? String)
+        format.click()
+        format.typeKey("a", modifierFlags: .command)
+        format.typeText("yyyy/MM/dd")
+        let warning = app.staticTexts["Invalid format (no path separators; basename only)"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.isEnabled)
+
+        newNote.click()
+        XCTAssertFalse(format.exists)
+        XCTAssertFalse(save.isEnabled)
+
+        name.click()
+        name.typeText(" edited")
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+        app.buttons["Cancel"].click()
+
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertEqual(name.value as? String, originalName + " edited")
+        rolling.click()
+        XCTAssertEqual(format.value as? String, savedFormat)
+        XCTAssertFalse(warning.exists)
+
+        newNote.click()
+        name.click()
+        name.typeKey("a", modifierFlags: .command)
+        name.typeText(originalName)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+    }
+
+    @MainActor
     func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
         let app = XCUIApplication()
         app.launch()
