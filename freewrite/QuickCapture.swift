@@ -16,8 +16,20 @@ struct CaptureHotKey: Codable, Equatable {
         self.keyLabel = keyLabel
     }
 
-    init?(event: NSEvent, modifiers: NSEvent.ModifierFlags? = nil) {
-        let modifiers = modifiers ?? event.modifierFlags
+    init?(event: NSEvent) {
+        self.init(event: event, modifiers: event.modifierFlags)
+    }
+
+    init?(keyOnly event: NSEvent, modifiers: NSEvent.ModifierFlags) {
+        guard event.modifierFlags.intersection(Self.supportedModifiers).isEmpty,
+              let characters = event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers,
+              !characters.isEmpty, characters.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains) else {
+            return nil
+        }
+        self.init(event: event, modifiers: modifiers)
+    }
+
+    private init?(event: NSEvent, modifiers: NSEvent.ModifierFlags) {
         guard !modifiers.intersection(Self.requiredModifiers).isEmpty else { return nil }
         guard let label = Self.keyLabel(for: event) else { return nil }
         self.init(keyCode: UInt32(event.keyCode), modifiers: modifiers, keyLabel: label)
@@ -253,9 +265,7 @@ final class CaptureShortcutSettings: ObservableObject {
 
         let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.window === alert.window,
-                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                  let candidate = CaptureHotKey(event: event, modifiers: .control),
-                  candidate.keyLabel.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains) else {
+                  let candidate = CaptureHotKey(keyOnly: event, modifiers: .control) else {
                 return event
             }
             keyCode = candidate.keyCode

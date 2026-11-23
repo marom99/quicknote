@@ -21,7 +21,14 @@ struct QuickCaptureTests {
             timestamp: 0, windowNumber: 0, context: nil, characters: "k", charactersIgnoringModifiers: "k",
             isARepeat: false, keyCode: UInt16(kVK_ANSI_K)))
         #expect(CaptureHotKey(event: event) == nil)
-        #expect(CaptureHotKey(event: event, modifiers: [.control, .option, .command])?.displayString == "⌃⌥⌘K")
+        #expect(CaptureHotKey(keyOnly: event, modifiers: [.control, .option, .command])?.displayString == "⌃⌥⌘K")
+    }
+
+    @Test func keyOnlyRecordingLeavesSpaceForCheckboxes() throws {
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: 0, context: nil, characters: " ", charactersIgnoringModifiers: " ",
+            isARepeat: false, keyCode: UInt16(kVK_Space)))
+        #expect(CaptureHotKey(keyOnly: event, modifiers: .control) == nil)
     }
 
     @MainActor @Test func showWindowTargetsKeyEditorAndDoesNotUseFallback() {
