@@ -140,6 +140,55 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenInvalidRollingFormatUsesNewPeriodDefault() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let rolling = app.buttons["Rolling"]
+        let newNote = app.buttons["New note"]
+        let save = app.buttons["Save"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let daily = app.buttons["Daily"]
+        let monthly = app.buttons["Monthly"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+
+        func enterFormat(_ value: String) {
+            format.click()
+            format.typeKey("a", modifierFlags: .command)
+            format.typeText(value)
+        }
+
+        rolling.click()
+        let originalFormat = try XCTUnwrap(format.value as? String)
+        monthly.click()
+        let expectedMonthlyFormat = format.value as? String
+        enterFormat("yyyy/MM/dd")
+        XCTAssertFalse(save.isEnabled)
+        newNote.click()
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+
+        app.terminate()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        rolling.click()
+        XCTAssertTrue(format.waitForExistence(timeout: 5))
+        let savedMonthlyFormat = format.value as? String
+
+        daily.click()
+        if (format.value as? String) != originalFormat {
+            enterFormat(originalFormat)
+        }
+        newNote.click()
+        save.click()
+
+        XCTAssertEqual(expectedMonthlyFormat, "yyyy-MM")
+        XCTAssertEqual(savedMonthlyFormat, expectedMonthlyFormat)
+    }
+
+    @MainActor
     func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
         let app = XCUIApplication()
         app.launch()

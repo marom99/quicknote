@@ -1329,7 +1329,7 @@ struct ContentView: View {
             displayName: settingsDisplayName,
             saveMode: settingsSaveMode,
             rollingPeriod: settingsRollingPeriod,
-            filenameFormat: effectiveSettingsFilenameFormat(for: destination),
+            filenameFormat: settingsRollingFilenamePreview == nil ? nil : settingsFilenameFormat,
             newNoteFilenameFormat: settingsNewNoteFilenameFormat,
             existingNoteFilename: .some(settingsExistingNoteFilename)
         )
