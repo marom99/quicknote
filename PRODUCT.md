@@ -23,7 +23,7 @@ The quietest local-first quick-capture surface on macOS: open the app and you ar
 - Native macOS desktop app (SwiftUI / AppKit window chrome), typically used in a single focused window during a quiet writing session.
 - Entries live under `~/Documents/Quick Note/` as plain `.md` files; video assets (when present) live under `~/Documents/Quick Note/Videos/`.
 - Core loop: open → write into today's empty entry → auto-save on every change → optionally open History to revisit or delete → optionally play an existing video entry.
-- Theme (light/dark) is user-switchable and persisted; writing font is currently fixed (Lato at 14px) for the session chrome/product surface as shipped.
+- Theme (light/dark) is user-switchable and persisted; editor body text uses Lato at a fixed 16px.
 - Distribution: development via Xcode (`freewrite.xcodeproj`); forked from [freewrite](https://github.com/farzaa/freewrite).
 
 ## Capabilities and Constraints
@@ -78,4 +78,4 @@ The quietest local-first quick-capture surface on macOS: open the app and you ar
 - Full dark and light modes, user-switchable and persisted.
 - Soft ink on paper/night (not pure black-on-white body text) for long-session comfort; 1.5× line height on the writing surface.
 - History and primary actions remain visible by default; do not gate core content behind hover-only reveals.
-- No confirmed Dynamic Type / system text-size support in the current fixed 14px editor; treat broader type scaling as undecided unless reintroduced.
+- No confirmed Dynamic Type / system text-size support in the fixed 16px editor; treat broader type scaling as undecided unless reintroduced.
