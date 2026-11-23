@@ -355,6 +355,15 @@ final class freewriteUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "Search first \(tag)\nfirst match \(tag)")
         app.typeText("!")
         XCTAssertTrue((editor.value as? String ?? "").contains("!"))
+
+        let openedText = editor.value as? String
+        app.typeKey("h", modifierFlags: [.command, .shift])
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.click()
+        app.typeText(tag)
+        XCTAssertTrue(app.staticTexts["Search second \(tag)"].exists)
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(editor.value as? String, openedText, "Return should open the highlighted note")
     }
 
     private func hasKeyboardFocus(_ element: XCUIElement) -> Bool {

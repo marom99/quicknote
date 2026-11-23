@@ -2083,10 +2083,10 @@ struct ContentView: View {
 
     private var historyResultsList: some View {
         let results = filteredHistoryResults
-        let keyboardSelection = historyKeyboardEntryID != nil || isSearchingNotes
+        let hasQuery = !HistorySearch.terms(from: historySearchQuery).isEmpty
+        let keyboardSelection = historyKeyboardEntryID != nil || isSearchingNotes || hasQuery
         let highlightedID = keyboardSelection ? keyboardHistoryResult(in: results)?.id : nil
         let isLoading = searchAllDestinations && otherDestinationResults == nil
-        let hasQuery = !HistorySearch.terms(from: historySearchQuery).isEmpty
 
         return VStack(spacing: 0) {
             if isLoading || (results.isEmpty && hasQuery) {
@@ -2103,8 +2103,7 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(results) { result in
-                            let selected = keyboardSelection ? result.id == highlightedID :
-                                result.destinationID == destinationStore.activeDestinationId && result.entry.id == selectedEntryId
+                            let selected = keyboardSelection ? result.id == highlightedID : isOpenHistoryResult(result)
                             historyResultRow(result, isSelected: selected, hasQuery: hasQuery)
                                 .id(result.id)
                             if result.id != results.last?.id { Divider() }
@@ -2243,13 +2242,20 @@ struct ContentView: View {
     }
 
     private func keyboardHistoryResult(in results: [HistoryResult]) -> HistoryResult? {
-        results.first { $0.id == historyKeyboardEntryID } ?? results.first
+        if let highlighted = results.first(where: { $0.id == historyKeyboardEntryID }) { return highlighted }
+        if !isSearchingNotes, let open = results.first(where: isOpenHistoryResult) { return open }
+        return results.first
+    }
+
+    private func isOpenHistoryResult(_ result: HistoryResult) -> Bool {
+        result.destinationID == destinationStore.activeDestinationId && result.entry.id == selectedEntryId
     }
 
     private func moveHistorySelection(by offset: Int) {
         let results = filteredHistoryResults
         guard !results.isEmpty else { return }
-        let currentIndex = results.firstIndex { $0.id == historyKeyboardEntryID } ?? 0
+        let currentID = keyboardHistoryResult(in: results)?.id
+        let currentIndex = results.firstIndex { $0.id == currentID } ?? 0
         let nextIndex = max(0, min(results.count - 1, currentIndex + offset))
         historyKeyboardEntryID = results[nextIndex].id
     }
