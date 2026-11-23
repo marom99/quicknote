@@ -105,6 +105,11 @@ final class freewriteUITests: XCTestCase {
         XCTAssertTrue(hasKeyboardFocus(app.textViews.firstMatch), "Editor lost focus after theme toggle")
 
         app.buttons["historyButton"].click()
+        let header = app.buttons["historyHeader"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.label.contains("Quick Note"))
+        XCTAssertFalse(header.label.contains("/"), "History should show the destination name, not its path")
+
         let row = app.staticTexts[seed]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.click()
