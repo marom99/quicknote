@@ -18,6 +18,14 @@ private final class EditorFocusTestField: NSTextField, NSTextViewDelegate {}
 
 struct freewriteTests {
 
+    @Test func appKeepsItsBundleIdentityWithoutRecordingUsageDescriptions() {
+        let appBundle = Bundle.main
+        #expect(appBundle.bundleIdentifier == "app.humansongs.freewrite")
+        for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription"] {
+            #expect(appBundle.object(forInfoDictionaryKey: key) == nil, "Unexpected recording privacy key: \(key)")
+        }
+    }
+
     @Test @MainActor func automaticEditorFocusRespectsOtherRespondersAndRails() async {
         let window = EditorFocusTestWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
                               styleMask: [.titled], backing: .buffered, defer: false)

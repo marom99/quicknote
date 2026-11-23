@@ -10,6 +10,20 @@ import AVKit
 import AVFoundation
 import AppKit
 
+func generateVideoThumbnail(from url: URL, at time: CMTime = CMTime(seconds: 0, preferredTimescale: 1)) -> NSImage? {
+    let asset = AVAsset(url: url)
+    let imageGenerator = AVAssetImageGenerator(asset: asset)
+    imageGenerator.appliesPreferredTrackTransform = true
+
+    do {
+        let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    } catch {
+        print("Error generating thumbnail: \(error)")
+        return nil
+    }
+}
+
 private struct FillVideoPlayerSurface: NSViewRepresentable {
     let player: AVPlayer
     
