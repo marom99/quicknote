@@ -43,7 +43,7 @@ Quick Note is a distraction-free writing environment for macOS. It also plays ex
 
 **Hidden Power Feature - Long-Form Writing:**
 - Despite minimalist interface, supports full markdown
-- Font and size customization for comfort during long sessions
+- Fixed 16px Lato body text for comfort during long sessions
 - Dark mode for night writing
 
 ## Overview
@@ -161,8 +161,6 @@ The main view containing all UI and business logic.
 @State private var currentVideoURL: URL? = nil          // Video playback URL
 @State private var showingSidebar = false               // History sidebar visibility
 @State private var colorScheme: ColorScheme = .light    // Light/dark theme
-@State private var fontSize: CGFloat = 18               // Text size (16-26px)
-@State private var selectedFont: String = "Lato-Regular"// Current font
 @State private var timerIsRunning = false               // Timer state
 @State private var timeRemaining: Int = 900             // Timer (seconds)
 @State private var backspaceDisabled = false            // Backspace lock
@@ -202,7 +200,7 @@ struct VideoPlayerView: View {
 │                                                         │
 ├─────────────────────────────────────────────────────────┤
 │  Bottom Nav Bar:                                        │
-│  [16px] • [Lato] • [Arial] • [System] • [Serif] • ...  │
+│  [Destination]                                          │
 │     [New Note] • [Theme] • [History]                    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -226,11 +224,9 @@ struct VideoPlayerView: View {
 
 ## Navigation Bar Items
 
-### Left Side (Font Controls)
-- **Font Size**: Cycles through [16, 18, 20, 22, 24, 26]px
-- **Font Selection**: Lato, Arial, System, Serif, Random
-- Hover changes cursor to pointing hand
-- **Video Mode Left Slot**: Replaced by `Copy Transcript` when viewing a video entry
+### Left Side
+- **Destination**: Shows the active save destination and opens its menu.
+- **Copy Transcript**: Appears alongside the destination when viewing a video with a transcript.
 
 ### Right Side (Utilities)
 - **Timer**: Shows time remaining, click to start/stop, double-click to reset
@@ -591,42 +587,26 @@ This handles edge cases like February 29th on non-leap years.
 
 ### Font System
 
-**Available Fonts**:
-```swift
-let standardFonts = ["Lato-Regular", "Arial", ".AppleSystemUIFont", "Times New Roman"]
-let availableFonts = NSFontManager.shared.availableFontFamilies
-```
-
-**Random Font Button**:
-- Picks random font from `availableFonts` (excludes standardFonts)
-- Shows current random font in button: "Random [FontName]"
-- Clicking again picks new random font
-
-**Font Rendering**:
-```swift
-.font(.custom(selectedFont, size: fontSize))
-```
-
-`.custom()` falls back to system font if font not found, so app is resilient to missing fonts.
+The body uses Lato Regular at a fixed 16px with a system font fallback. `FreewriteTextEditor.bodyFontSize` also sets the placeholder size and the line-spacing calculation.
 
 ### Line Spacing Calculation
 
 ```swift
 var lineHeight: CGFloat {
+    let fontSize = FreewriteTextEditor.bodyFontSize
     let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
     let defaultLineHeight = getLineHeight(font: font)
     return (fontSize * 1.5) - defaultLineHeight
 }
 
 func getLineHeight(font: NSFont) -> CGFloat {
-    let layoutManager = NSLayoutManager()
-    return layoutManager.defaultLineHeight(for: font)
+    return font.ascender - font.descender + font.leading
 }
 ```
 
 **Formula**: Target line height is 1.5× font size. Subtract natural line height to get spacing to add.
 
-Example: 18px font → target 27px line height → natural 21px → add 6px spacing
+At 16px, the target line height is 24px.
 
 This creates **generous vertical rhythm** for readability during long writing sessions.
 
@@ -736,7 +716,7 @@ Stored in `UserDefaults`:
 - `colorScheme`: "light" or "dark"
 
 Other settings are session-only (not persisted):
-- Font size, font family, timer duration, backspace state
+- Timer duration, backspace state
 
 ## Future Development Notes
 

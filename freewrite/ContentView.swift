@@ -143,6 +143,8 @@ struct RailRemovalObserver: NSViewRepresentable {
 }
 
 struct FreewriteTextEditor: NSViewRepresentable {
+    static let bodyFontSize: CGFloat = 16
+
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
     var quickCaptureFocusRequest: UUID?
@@ -153,7 +155,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
     let focusRequest: UUID
     @Binding var caretEndRequest: UUID?
     let selectedFont: String
-    let fontSize: CGFloat
     let lineSpacing: CGFloat
     let colorScheme: ColorScheme
     let editorInset: CGFloat
@@ -210,7 +211,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
             text: text,
             editorID: editorID,
             selectedFont: selectedFont,
-            fontSize: fontSize,
             lineSpacing: lineSpacing,
             colorScheme: colorScheme
         )
@@ -244,7 +244,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
                 text: text,
                 editorID: editorID,
                 selectedFont: selectedFont,
-                fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 colorScheme: colorScheme
             )
@@ -316,11 +315,11 @@ struct FreewriteTextEditor: NSViewRepresentable {
             text: String,
             editorID: UUID?,
             selectedFont: String,
-            fontSize: CGFloat,
             lineSpacing: CGFloat,
             colorScheme: ColorScheme
         ) {
             let editorChanged = lastConfiguredEditorID != editorID
+            let fontSize = FreewriteTextEditor.bodyFontSize
             let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
             let textColor = colorScheme == .light
                 ? NSColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1.0)
@@ -497,7 +496,6 @@ struct ContentView: View {
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
     
     private let selectedFont: String = "Lato-Regular"
-    private let fontSize: CGFloat = 14
     @State private var bottomNavOpacity: Double = 1.0
     @State private var savedConfirmation: String?
     @State private var savedConfirmationID = UUID()
@@ -1547,6 +1545,7 @@ struct ContentView: View {
     }
     
     var lineHeight: CGFloat {
+        let fontSize = FreewriteTextEditor.bodyFontSize
         let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
         let defaultLineHeight = getLineHeight(font: font)
         return (fontSize * 1.5) - defaultLineHeight
@@ -1664,7 +1663,6 @@ struct ContentView: View {
                         focusRequest: editorFocusRequest,
                         caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
-                        fontSize: fontSize,
                         lineSpacing: lineHeight,
                         colorScheme: colorScheme,
                         editorInset: editorInset,
@@ -1681,7 +1679,7 @@ struct ContentView: View {
                         .overlay(alignment: .topLeading) {
                             if text.isEmpty {
                                 Text(placeholderText)
-                                    .font(.custom(selectedFont, size: fontSize))
+                                    .font(.custom(selectedFont, fixedSize: FreewriteTextEditor.bodyFontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
                                     // Align with NSTextView's native horizontal line-fragment padding.
                                     .padding(.top, editorInset)
@@ -1690,7 +1688,7 @@ struct ContentView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .id("\(selectedFont)-\(fontSize)")
+                        .id(selectedFont)
                         .colorScheme(colorScheme)
                         .transaction { $0.animation = nil }
                         .onAppear {

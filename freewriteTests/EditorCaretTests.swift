@@ -25,10 +25,19 @@ struct EditorCaretTests {
             text: text,
             editorID: editorID,
             selectedFont: "Lato-Regular",
-            fontSize: 18,
             lineSpacing: 4,
             colorScheme: .light
         )
+    }
+
+    @Test func bodyUsesFixedSizeForLoadedTextAndTyping() {
+        let (coordinator, textView, _) = makeEditor()
+        configure(coordinator, textView, text: "Loaded note", editorID: UUID())
+
+        let loadedFont = textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        let typingFont = textView.typingAttributes[.font] as? NSFont
+        #expect(loadedFont?.pointSize == 16)
+        #expect(typingFont?.pointSize == 16)
     }
 
     @Test func rollingSeparatorPutsNextSessionOnItsOwnLine() {

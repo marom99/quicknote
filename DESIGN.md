@@ -15,7 +15,7 @@ colors:
 typography:
   body:
     fontFamily: "Lato, Lato-Regular, -apple-system, sans-serif"
-    fontSize: "14px"
+    fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.5
     inset: "18px"
@@ -127,13 +127,13 @@ A strict monochrome ramp. Identity is carried by ink and paper, never by hue. Tw
 **Character:** A calm, humanist pairing. Lato at a generous 1.5× line height creates easy vertical rhythm for long writing sessions; the compact system sans keeps the navigation quiet and unobtrusive. A fixed 18px page inset keeps the text off the window edges.
 
 ### Hierarchy
-- **Body** (regular, 14px default, 1.5× line height): The core surface — the user's writing. Full window width, inset 18px; the bottom edge adds reserved clearance for the floating navigation.
+- **Body** (regular, fixed 16px, 1.5× line height): The core surface — the user's writing. Full window width, inset 18px; the bottom edge adds reserved clearance for the floating navigation.
 - **Label** (regular, 13px): Navigation controls, sidebar entry previews, action buttons.
 - **Label Small** (regular, 12px): Entry dates, secondary sidebar metadata, popover sublabels.
 - **Display/Headline**: Intentionally absent. A writing tool has no hero headings; the writing is the only "display."
 
 ### Named Rules
-**The One Voice Rule.** Every font is an option the *writer* chooses for their own words (Lato, Arial, System, Serif, or random). The system chrome itself always speaks in the native system sans — the tool's voice stays distinct from the writer's.
+**The One Voice Rule.** The writer's words use Lato. The chrome uses the native system sans, keeping the tool's voice distinct from the writer's.
 
 ## Layout
 
