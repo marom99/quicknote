@@ -116,6 +116,58 @@ final class freewriteUITests: XCTestCase {
         XCTAssertTrue(value.contains("ZZ"), "Typed text was dropped; editor holds: \(value)")
     }
 
+    @MainActor
+    func testHistorySearchMatchesTitleAndBody() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let tag = UUID().uuidString.prefix(8).lowercased()
+        let firstTitle = "search alpha \(tag)"
+        let secondTitle = "search beta \(tag)"
+        let editor = app.textViews["mainEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.click()
+        editor.typeText("\(firstTitle)\nbody mentions zucchini\(tag)")
+        app.buttons["New Note"].click()
+        editor.click()
+        editor.typeText("\(secondTitle)\nbody mentions okra")
+        app.buttons["New Note"].click()
+
+        app.buttons["historyButton"].click()
+        let search = app.textFields["historySearchField"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts[firstTitle].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts[secondTitle].exists)
+
+        search.click()
+        search.typeText("ZUCCHINI\(tag)")
+        XCTAssertTrue(app.staticTexts[firstTitle].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts[secondTitle].exists, "Body search kept a non-matching note")
+
+        search.typeKey("a", modifierFlags: .command)
+        search.typeText("beta \(tag)")
+        XCTAssertTrue(app.staticTexts[secondTitle].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts[firstTitle].exists, "Title search kept a non-matching note")
+
+        search.typeKey("a", modifierFlags: .command)
+        search.typeText("nomatch\(tag)")
+        XCTAssertTrue(app.staticTexts["historySearchEmpty"].waitForExistence(timeout: 5))
+
+        app.buttons["historySearchClear"].click()
+        XCTAssertTrue(app.staticTexts[firstTitle].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts[secondTitle].exists)
+
+        search.click()
+        search.typeText("zucchini\(tag)")
+        let match = app.staticTexts[firstTitle]
+        XCTAssertTrue(match.waitForExistence(timeout: 5))
+        match.click()
+        XCTAssertTrue(hasKeyboardFocus(editor), "Editor lost focus after selecting a filtered History note")
+        app.typeText("QQ")
+        XCTAssertEqual(search.value as? String, "zucchini\(tag)", "Typing after selection went into History search")
+        XCTAssertTrue((editor.value as? String ?? "").contains("QQ"), "Typed text did not reach the editor")
+    }
+
     private func hasKeyboardFocus(_ element: XCUIElement) -> Bool {
         element.value(forKey: "hasKeyboardFocus") as? Bool ?? false
     }
