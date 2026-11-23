@@ -287,7 +287,8 @@ enum DestinationWriteTarget {
             remainingBytes -= String(character).utf8.count
             return remainingBytes >= 0
         }
-        let shortenedBase = validatedBasename(String(prefix)) ?? fallbackBasename
+        let trimmedPrefix = prefix.reversed().drop { $0 == "." || $0.isWhitespace }.reversed()
+        let shortenedBase = validatedBasename(String(trimmedPrefix)) ?? fallbackBasename
         return "\(shortenedBase)\(suffix).md"
     }
 

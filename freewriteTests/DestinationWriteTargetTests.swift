@@ -543,4 +543,18 @@ struct DestinationWriteTargetTests {
         #expect(try String(contentsOf: directory.appendingPathComponent(collision), encoding: .utf8) == content)
         #expect(try String(contentsOf: existing, encoding: .utf8) == "Existing")
     }
+
+    @Test func truncatedTitleWithTrailingPeriodAppearsInExistingNoteChoices() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let prefix = String(repeating: "📝", count: 62)
+        let title = prefix + "ab. more notes"
+        let basename = try #require(DestinationWriteTarget.sanitizedTitleBasename(from: title))
+        let filename = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        #expect(filename == prefix + "ab.md")
+        try title.write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        #expect(DestinationWriteTarget.existingNoteChoices(in: directory) == [filename])
+    }
 }
