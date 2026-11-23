@@ -2440,6 +2440,9 @@ struct ContentView: View {
         let currentMode = settingsSaveMode
         let currentPeriod = settingsRollingPeriod
         let existingName = settingsExistingNoteFilename
+        let existingNoteChoices = currentMode == .existing
+            ? destinationStore.resolvedDocumentsURL().map { DestinationWriteTarget.existingNoteChoices(in: $0) } ?? []
+            : []
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -2612,14 +2615,34 @@ struct ContentView: View {
                                 .foregroundColor(existingName == nil ? .secondary : textColor)
                                 .lineLimit(2)
 
-                            Button("Choose note…") {
-                                DispatchQueue.main.async {
-                                    pickExistingNoteForActiveDestination()
+                            Menu("Choose note…") {
+                                ForEach(existingNoteChoices, id: \.self) { filename in
+                                    Button {
+                                        settingsExistingNoteFilename = filename
+                                    } label: {
+                                        if filename == existingName {
+                                            Label(filename, systemImage: "checkmark")
+                                        } else {
+                                            Text(filename)
+                                        }
+                                    }
+                                }
+                                if !existingNoteChoices.isEmpty {
+                                    Divider()
+                                }
+                                Button("New note…") {
+                                    // Dismiss the SwiftUI Menu before presenting the alert.
+                                    DispatchQueue.main.async {
+                                        promptForNewExistingNote()
+                                    }
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
                             .font(.system(size: 13))
                             .foregroundColor(textColor)
+                            .disabled(destinationStore.activeAccessFailed)
                         }
                     }
                 }
@@ -2646,43 +2669,37 @@ struct ContentView: View {
         }
     }
 
-    private func pickExistingNoteForActiveDestination() {
-        guard let documentsURL = destinationStore.resolvedDocumentsURL() else { return }
+    private func promptForNewExistingNote(initialName: String = "", rejected: Bool = false) {
+        let field = NSTextField(string: initialName)
+        field.placeholderString = "journal.md"
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
 
-        UserDefaults.standard.removeObject(forKey: "NSOSPLastRootDirectory")
+        let alert = NSAlert()
+        alert.messageText = "New note"
+        alert.informativeText = rejected
+            ? "Use a file name without folders, like journal.md."
+            : "Name a markdown file in \(activeDestinationDisplayName). It is created when you save."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Use Note")
+        alert.addButton(withTitle: "Cancel")
 
-        // Save panel allows pick-or-create a .md basename under the destination root.
-        let panel = NSSavePanel()
-        panel.canCreateDirectories = false
-        panel.directoryURL = documentsURL
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.allowsOtherFileTypes = true
-        panel.nameFieldStringValue = settingsExistingNoteFilename ?? "journal.md"
-        panel.title = "Choose or create a note"
-        panel.message = "Select or name a markdown file in this destination folder."
-        panel.prompt = "Use Note"
-
-        let response = panel.runModal()
-        guard response == .OK, let url = panel.url else { return }
-
-        let standardizedRoot = documentsURL.standardizedFileURL.path
-        let standardizedPick = url.standardizedFileURL.path
-        guard standardizedPick.hasPrefix(standardizedRoot + "/") || standardizedPick == standardizedRoot else {
-            print("Existing note must stay inside the destination folder")
-            return
+        let handleResponse: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            if let filename = DestinationWriteTarget.existingNoteFilename(fromInput: field.stringValue) {
+                settingsExistingNoteFilename = filename
+            } else {
+                DispatchQueue.main.async {
+                    promptForNewExistingNote(initialName: field.stringValue, rejected: true)
+                }
+            }
         }
 
-        let relative = String(standardizedPick.dropFirst(standardizedRoot.count + 1))
-        guard DestinationWriteTarget.validatedBasename(relative) != nil,
-              !relative.contains("/") else {
-            print("Existing note must be a root-level basename (no subfolders)")
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            handleResponse(alert.runModal())
             return
         }
-
-        let filename = DestinationWriteTarget.markdownFilename(
-            fromBasename: DestinationWriteTarget.validatedBasename(relative) ?? relative
-        )
-        settingsExistingNoteFilename = filename
+        alert.beginSheetModal(for: window, completionHandler: handleResponse)
+        alert.window.makeFirstResponder(field)
     }
 
     private func deleteEntry(entry: HumanEntry) {
