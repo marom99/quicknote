@@ -4,6 +4,40 @@ import Testing
 
 struct HistoryTrashTests {
     @Test(arguments: [DestinationSaveMode.existing, .rolling])
+    func unreadableConfiguredTargetCanBeRecreatedAfterTrash(mode: DestinationSaveMode) throws {
+        try withDirectory { directory in
+            let destination = SaveDestination(
+                id: UUID(), displayName: "Test", isDefault: false,
+                saveMode: mode, existingNoteFilename: "journal.md"
+            )
+            let now = Date()
+            let target = try #require(DestinationWriteTarget.resolve(
+                for: destination, documentsURL: directory, now: now
+            ))
+            let invalid = Data([0xFF])
+            try invalid.write(to: target.fileURL)
+            var state = NoteSaveState()
+            #expect(throws: CocoaError.self) { try state.load(from: target.fileURL) }
+
+            var trash = HistoryTrash()
+            try trash.moveToTrash(target.fileURL)
+            defer { try? trash.restore() }
+            #expect(!FileManager.default.fileExists(atPath: target.fileURL.path))
+            let recreated = try #require(DestinationWriteTarget.resolveForUnboundEdit(
+                content: "New writing", destination: destination, documentsURL: directory, now: now
+            ))
+            #expect(recreated.didCreate)
+            let content = try DestinationWriteTarget.contentForUnboundEdit("New writing", target: recreated)
+            _ = try state.save(content, to: recreated.fileURL)
+            #expect(try state.load(from: recreated.fileURL) == "New writing")
+
+            try FileManager.default.removeItem(at: recreated.fileURL)
+            try trash.restore()
+            #expect(try Data(contentsOf: target.fileURL) == invalid)
+        }
+    }
+
+    @Test(arguments: [DestinationSaveMode.existing, .rolling])
     func unboundEmptyEditLeavesTrashedTargetAvailableForUndo(mode: DestinationSaveMode) throws {
         try withDirectory { directory in
             let destination = SaveDestination(
