@@ -537,7 +537,7 @@ struct ContentView: View {
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
     @State private var noteSaveState = NoteSaveState()
-    @State private var configuredNoteOpenFailed = false
+    @State private var unreadableConfiguredNoteURL: URL?
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var historySearchQuery = ""
@@ -1166,7 +1166,7 @@ struct ContentView: View {
     }
 
     private func bindToResolvedWriteTarget(appendSeparator: Bool = false) -> Bool {
-        configuredNoteOpenFailed = false
+        unreadableConfiguredNoteURL = nil
         guard let destination = destinationStore.activeDestination,
               destination.saveMode == .rolling || destination.saveMode == .existing,
               let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
@@ -1223,7 +1223,7 @@ struct ContentView: View {
         }
 
         guard loadEntry(entry: entry) else {
-            configuredNoteOpenFailed = true
+            unreadableConfiguredNoteURL = target.fileURL.standardizedFileURL
             return false
         }
 
@@ -1514,9 +1514,14 @@ struct ContentView: View {
         destinationStore.activeDestination?.displayName ?? SaveDestination.defaultDisplayName
     }
 
+    private var unreadableConfiguredNoteBlocksEditor: Bool {
+        guard selectedEntryId == nil, let unreadableConfiguredNoteURL else { return false }
+        return fileManager.fileExists(atPath: unreadableConfiguredNoteURL.path)
+    }
+
     // Add function to load existing entries
     private func loadExistingEntries() {
-        configuredNoteOpenFailed = false
+        unreadableConfiguredNoteURL = nil
         guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
             print("Active destination is unavailable; showing empty History")
             entries = []
@@ -1702,7 +1707,7 @@ struct ContentView: View {
                         .ignoresSafeArea(edges: .top)
                         // Avoid animating AVKit/AppKit representables when History opens.
                         .transaction { $0.animation = nil }
-                } else if configuredNoteOpenFailed && selectedEntryId == nil {
+                } else if unreadableConfiguredNoteBlocksEditor {
                     Text("The configured note couldn't be opened. Choose another note in History or Destination settings.")
                         .foregroundStyle(.secondary)
                         .padding(editorInset)
@@ -2203,6 +2208,9 @@ struct ContentView: View {
                     print("Error reading unbound write target: \(error)")
                     return
                 }
+                if unreadableConfiguredNoteURL == target.fileURL.standardizedFileURL {
+                    unreadableConfiguredNoteURL = nil
+                }
                 if mergedText != text {
                     text = mergedText
                     editorCaretEndRequest = UUID()
@@ -2358,12 +2366,14 @@ struct ContentView: View {
     private func loadEntry(entry: HumanEntry, beforeDisplaying: () -> Bool = { true }) -> Bool {
         let videoFilename = resolvedVideoFilename(for: entry)
         var loadedText = ""
+        var loadedURL: URL?
         if videoFilename == nil {
             guard let documentsDirectory = getDocumentsDirectory() else { return false }
             let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
             do {
                 loadedText = try noteSaveState.load(from: fileURL)
+                loadedURL = fileURL.standardizedFileURL
                 print("Successfully loaded entry: \(entry.filename)")
             } catch {
                 print("Error loading entry: \(error)")
@@ -2373,6 +2383,9 @@ struct ContentView: View {
         }
 
         guard beforeDisplaying() else { return false }
+        if let loadedURL, unreadableConfiguredNoteURL == loadedURL {
+            unreadableConfiguredNoteURL = nil
+        }
         isLoadingEntry = true
         defer { isLoadingEntry = false }
 
