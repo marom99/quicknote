@@ -23,6 +23,7 @@ struct HumanEntry: Identifiable {
     var entryType: EntryType
     var videoFilename: String?
     var timestamp: Date? = nil
+    var searchableBody: String = ""
 
     static func createNew() -> HumanEntry {
         let id = UUID()
@@ -528,6 +529,8 @@ struct ContentView: View {
     @State private var noteSaveState = NoteSaveState()
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
+    @State private var historySearchQuery = ""
+    @FocusState private var historySearchFocused: Bool
     @State private var showingDestinationSettings = false
     @State private var hoveredTrashId: UUID? = nil
     @State private var placeholderText: String = ""  // Add this line
@@ -989,7 +992,8 @@ struct ContentView: View {
             previewText: existing.previewText,
             entryType: existing.entryType,
             videoFilename: existing.videoFilename,
-            timestamp: existing.timestamp
+            timestamp: existing.timestamp,
+            searchableBody: existing.searchableBody
         )
         if selectedEntryId == existing.id {
             selectedEntryId = newId
@@ -1182,7 +1186,8 @@ struct ContentView: View {
                     previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
                     entryType: hasVideo ? .video : .text,
                     videoFilename: hasVideo ? videoFilename : nil,
-                    timestamp: fileDate
+                    timestamp: fileDate,
+                    searchableBody: hasVideo ? (loadTranscriptText(for: videoFilename) ?? "") : content
                 ),
                 date: fileDate,
                 content: content
@@ -1301,6 +1306,7 @@ struct ContentView: View {
             } else {
                 syncSettingsDraftFromActiveDestination()
                 showingDestinationSettings = false
+                historySearchQuery = ""
                 showingSidebar = true
             }
         }
@@ -1524,6 +1530,7 @@ struct ContentView: View {
         destinationStore.activateDestination(id: id)
         historyTrash = nil
         trashedEntry = nil
+        historySearchQuery = ""
         // Defer journal reload so ForEach(entries) isn't mid-update when History is open.
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
@@ -2000,11 +2007,26 @@ struct ContentView: View {
                     }
                     
                     Divider()
-                    
+
+                    historySearchField
+
+                    Divider()
+
+                    let visibleEntries = filteredHistoryEntries
+                    if visibleEntries.isEmpty && !HistorySearch.terms(from: historySearchQuery).isEmpty {
+                        Text("No notes match")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("historySearchEmpty")
+                    }
+
                     // Entries List
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(entries) { entry in
+                            ForEach(visibleEntries) { entry in
                                 HStack(alignment: .top) {
                                     // Show video thumbnail for video entries
                                     if let videoFilename = resolvedVideoFilename(for: entry) {
@@ -2088,7 +2110,7 @@ struct ContentView: View {
                                 }
                                 .help("Click to select this note")
 
-                                if entry.id != entries.last?.id {
+                                if entry.id != visibleEntries.last?.id {
                                     Divider()
                                 }
                             }
@@ -2233,6 +2255,50 @@ struct ContentView: View {
         }
     }
     
+    private var filteredHistoryEntries: [HumanEntry] {
+        HistorySearch.filter(
+            entries,
+            query: historySearchQuery,
+            title: { $0.previewText },
+            body: { entry in
+                // The open note's latest edits may not be saved yet.
+                entry.id == selectedEntryId && entry.entryType == .text ? text : entry.searchableBody
+            }
+        )
+    }
+
+    private var historySearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            TextField("Search", text: $historySearchQuery)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($historySearchFocused)
+                .onExitCommand {
+                    if historySearchQuery.isEmpty {
+                        historySearchFocused = false
+                    } else {
+                        historySearchQuery = ""
+                    }
+                }
+                .accessibilityIdentifier("historySearchField")
+            if !historySearchQuery.isEmpty {
+                Button(action: { historySearchQuery = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityIdentifier("historySearchClear")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
     private func historyRowTitle(for entry: HumanEntry) -> String {
         entry.previewText.isEmpty ? "Untitled" : entry.previewText
     }
@@ -2257,6 +2323,7 @@ struct ContentView: View {
             if let index = entries.firstIndex(where: { $0.id == entry.id }),
                let videoFilename = resolvedVideoFilename(for: entry) {
                 entries[index].previewText = videoPreviewText(for: videoFilename)
+                entries[index].searchableBody = loadTranscriptText(for: videoFilename) ?? ""
             }
             return
         }
@@ -2270,6 +2337,7 @@ struct ContentView: View {
             // Find and update the entry in the entries array
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries[index].previewText = HistoryRowFormatting.title(from: content)
+                entries[index].searchableBody = content
                 if parseCanonicalEntryFilename(entry.filename) == nil {
                     entries[index].timestamp = modificationDate(for: fileURL)
                 }
