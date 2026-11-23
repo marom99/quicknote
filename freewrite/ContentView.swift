@@ -572,6 +572,7 @@ struct ContentView: View {
     @State private var trashNoticeID = UUID()
     @State private var trashError: String? = nil
     @State private var noteOpenError: String? = nil
+    @State private var noteSaveError: String? = nil
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -1024,7 +1025,7 @@ struct ContentView: View {
     }
 
     @discardableResult
-    private func finalizeCaptureSession() -> Bool {
+    private func finalizeCaptureSession(keepEditingOnSaveFailure: Bool = false) -> Bool {
         guard isCapturePerSessionMode else {
             if let currentId = selectedEntryId,
                let currentEntry = entries.first(where: { $0.id == currentId }),
@@ -1048,6 +1049,10 @@ struct ContentView: View {
         var didSave = false
         if let entry = entries.first(where: { $0.filename == draftFilename }) {
             didSave = saveEntry(entry: entry, updatePreview: true)
+            if !didSave, keepEditingOnSaveFailure {
+                noteSaveError = entry.filename
+                return false
+            }
         }
 
         let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
@@ -1392,11 +1397,19 @@ struct ContentView: View {
         guard selectedEntryId != entry.id else { return }
 
         if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            finalizeCaptureSession()
+            finalizeCaptureSession(keepEditingOnSaveFailure: true)
+            guard inProgressCaptureFilename == nil else { return }
         } else if let currentId = selectedEntryId,
-           let currentEntry = entries.first(where: { $0.id == currentId }),
-           currentEntry.entryType == .text {
-            saveEntry(entry: currentEntry, updatePreview: false)
+                  let currentEntry = entries.first(where: { $0.id == currentId }),
+                  currentEntry.entryType == .text,
+                  !saveEntry(entry: currentEntry, updatePreview: false) {
+            let hasUnsavedChanges = getDocumentsDirectory().map { directory in
+                noteSaveState.hasUnsavedChanges(text, at: directory.appendingPathComponent(currentEntry.filename))
+            } ?? true
+            if hasUnsavedChanges {
+                noteSaveError = currentEntry.filename
+                return
+            }
         }
 
         guard let targetEntry = entries.first(where: { $0.id == entry.id }) else {
@@ -2101,6 +2114,14 @@ struct ContentView: View {
             Button("OK") { noteOpenError = nil }
         } message: {
             Text(noteOpenError ?? "")
+        }
+        .alert("Couldn't save note", isPresented: Binding(
+            get: { noteSaveError != nil },
+            set: { if !$0 { noteSaveError = nil } }
+        )) {
+            Button("OK") { noteSaveError = nil }
+        } message: {
+            Text("\(noteSaveError ?? "")\nYour text is still in the editor. Restore access to the note or copy your text to keep it.")
         }
         .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
             newEntry: createNewEntry,

@@ -150,6 +150,8 @@ struct NoteSaveStateTests {
         #expect(throws: (any Error).self) { try state.load(from: url) }
         #expect(throws: (any Error).self) { try state.save(editorText + " edit", to: url) }
         #expect(try Data(contentsOf: url) == invalid)
+        #expect(state.hasUnsavedChanges(editorText + " edit", at: url))
+        #expect(!state.hasUnsavedChanges(editorText, at: url))
 
         try "External UTF-8 text".write(to: url, atomically: true, encoding: .utf8)
         #expect(try state.save(editorText, to: url) == "External UTF-8 text")
