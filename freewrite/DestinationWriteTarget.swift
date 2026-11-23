@@ -162,6 +162,7 @@ enum DestinationWriteTarget {
     // MARK: - Capture-per-session (New note)
 
     static let captureDraftPrefix = ".quicknote-capture-"
+    private static let maximumMarkdownFilenameBytes = 255
 
     static func isCaptureDraftFilename(_ filename: String) -> Bool {
         filename.hasPrefix(captureDraftPrefix) && filename.lowercased().hasSuffix(".md")
@@ -266,19 +267,30 @@ enum DestinationWriteTarget {
             return markdownFilename(fromBasename: dateCaptureBasename())
         }
 
-        var candidate = markdownFilename(fromBasename: base)
-        if !fileExists(filename: candidate, in: documentsURL, excluding: excludedFilename, fileManager: fileManager) {
-            return candidate
-        }
-
-        var counter = 2
+        let fallbackBasename = dateCaptureBasename()
+        var counter = 1
         while true {
-            candidate = markdownFilename(fromBasename: "\(base)-\(counter)")
+            let suffix = counter == 1 ? "" : "-\(counter)"
+            let candidate = boundedMarkdownFilename(base: base, suffix: suffix, fallbackBasename: fallbackBasename)
             if !fileExists(filename: candidate, in: documentsURL, excluding: excludedFilename, fileManager: fileManager) {
                 return candidate
             }
             counter += 1
         }
+    }
+
+    private static func boundedMarkdownFilename(base: String, suffix: String, fallbackBasename: String) -> String {
+        let candidate = markdownFilename(fromBasename: "\(base)\(suffix)")
+        guard candidate.utf8.count > maximumMarkdownFilenameBytes else { return candidate }
+
+        var remainingBytes = maximumMarkdownFilenameBytes - "\(suffix).md".utf8.count
+        let prefix = base.prefix { character in
+            remainingBytes -= String(character).utf8.count
+            return remainingBytes >= 0
+        }
+        let trimmedPrefix = prefix.reversed().drop { $0 == "." || $0.isWhitespace }.reversed()
+        let shortenedBase = validatedBasename(String(trimmedPrefix)) ?? fallbackBasename
+        return "\(shortenedBase)\(suffix).md"
     }
 
     private static func fileExists(

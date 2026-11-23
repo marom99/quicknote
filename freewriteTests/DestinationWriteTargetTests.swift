@@ -519,4 +519,43 @@ struct DestinationWriteTargetTests {
         )
         #expect(unique == "note-2.md")
     }
+
+    @Test func oversizedTitleFilenameFitsWithExtensionAndCollisionSuffix() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let letter = "a\u{301}\u{301}\u{301}"
+        let title = String(repeating: letter, count: 80)
+        let content = "\(title)\n\nKeep this text."
+        let basename = try #require(DestinationWriteTarget.sanitizedTitleBasename(from: content))
+        let first = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        #expect(first == String(repeating: letter, count: 36) + ".md")
+        #expect(first.utf8.count == 255)
+        let existing = directory.appendingPathComponent(first)
+        try "Existing".write(to: existing, atomically: true, encoding: .utf8)
+
+        let collision = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        #expect(collision == String(repeating: letter, count: 35) + "-2.md")
+        #expect(collision.utf8.count <= 255)
+        let draft = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        try content.write(to: draft, atomically: true, encoding: .utf8)
+        #expect(try DestinationWriteTarget.recoverOrphanedCaptureDrafts(in: directory).isEmpty)
+        #expect(try String(contentsOf: directory.appendingPathComponent(collision), encoding: .utf8) == content)
+        #expect(try String(contentsOf: existing, encoding: .utf8) == "Existing")
+    }
+
+    @Test func truncatedTitleWithTrailingPeriodAppearsInExistingNoteChoices() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let prefix = String(repeating: "📝", count: 62)
+        let title = prefix + "ab. more notes"
+        let basename = try #require(DestinationWriteTarget.sanitizedTitleBasename(from: title))
+        let filename = DestinationWriteTarget.uniqueMarkdownFilename(preferredBasename: basename, documentsURL: directory)
+        #expect(filename == prefix + "ab.md")
+        try title.write(to: directory.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        #expect(DestinationWriteTarget.existingNoteChoices(in: directory) == [filename])
+    }
 }
