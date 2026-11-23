@@ -90,6 +90,105 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenInvalidRollingFormatDoesNotEnableSaveOrPersist() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let save = app.buttons["Save"]
+        let rolling = app.buttons["Rolling"]
+        let newNote = app.buttons["New note"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let name = app.textFields["Display name"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.isEnabled)
+        let originalName = try XCTUnwrap(name.value as? String)
+
+        rolling.click()
+        XCTAssertTrue(format.waitForExistence(timeout: 5))
+        let savedFormat = try XCTUnwrap(format.value as? String)
+        format.click()
+        format.typeKey("a", modifierFlags: .command)
+        format.typeText("yyyy/MM/dd")
+        let warning = app.staticTexts["Invalid format (no path separators; basename only)"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.isEnabled)
+
+        newNote.click()
+        XCTAssertFalse(format.exists)
+        XCTAssertFalse(save.isEnabled)
+
+        name.click()
+        name.typeText(" edited")
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+        app.buttons["Cancel"].click()
+
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertEqual(name.value as? String, originalName + " edited")
+        rolling.click()
+        XCTAssertEqual(format.value as? String, savedFormat)
+        XCTAssertFalse(warning.exists)
+
+        newNote.click()
+        name.click()
+        name.typeKey("a", modifierFlags: .command)
+        name.typeText(originalName)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+    }
+
+    @MainActor
+    func testHiddenInvalidRollingFormatUsesNewPeriodDefault() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let rolling = app.buttons["Rolling"]
+        let newNote = app.buttons["New note"]
+        let save = app.buttons["Save"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let daily = app.buttons["Daily"]
+        let monthly = app.buttons["Monthly"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+
+        func enterFormat(_ value: String) {
+            format.click()
+            format.typeKey("a", modifierFlags: .command)
+            format.typeText(value)
+        }
+
+        rolling.click()
+        let originalFormat = try XCTUnwrap(format.value as? String)
+        monthly.click()
+        let expectedMonthlyFormat = format.value as? String
+        enterFormat("yyyy/MM/dd")
+        XCTAssertFalse(save.isEnabled)
+        newNote.click()
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+
+        app.terminate()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        rolling.click()
+        XCTAssertTrue(format.waitForExistence(timeout: 5))
+        let savedMonthlyFormat = format.value as? String
+
+        daily.click()
+        if (format.value as? String) != originalFormat {
+            enterFormat(originalFormat)
+        }
+        newNote.click()
+        save.click()
+
+        XCTAssertEqual(expectedMonthlyFormat, "yyyy-MM")
+        XCTAssertEqual(savedMonthlyFormat, expectedMonthlyFormat)
+    }
+
+    @MainActor
     func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
         let app = XCUIApplication()
         app.launch()
@@ -204,6 +303,42 @@ final class freewriteUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertLessThanOrEqual(newEntry.frame.height, 20)
         XCTAssertTrue(window.frame.contains(newEntry.frame))
+    }
+
+    @MainActor
+    func testVisibleInvalidRollingEditPromptsBeforeOpeningHistory() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        let save = app.buttons["Save"]
+        let format = app.textFields["yyyy-MM-dd"]
+        let keepEditing = app.windows.firstMatch.sheets.firstMatch.buttons["Keep Editing"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        app.buttons["Rolling"].click()
+        save.click()
+
+        format.click()
+        format.typeKey("a", modifierFlags: .command)
+        format.typeText("yyyy/MM/dd")
+        XCTAssertFalse(save.isEnabled)
+        app.buttons["historyButton"].click()
+
+        let prompted = keepEditing.waitForExistence(timeout: 3)
+        if prompted {
+            keepEditing.click()
+        } else {
+            app.typeKey(",", modifierFlags: .command)
+        }
+        let draftFormat = format.value as? String
+        let couldSave = save.isEnabled
+
+        app.buttons["New note"].click()
+        save.click()
+
+        XCTAssertTrue(prompted, "Opening History should ask before dropping a visible invalid edit")
+        XCTAssertEqual(draftFormat, "yyyy/MM/dd")
+        XCTAssertFalse(couldSave)
     }
 
     @MainActor

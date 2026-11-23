@@ -326,7 +326,7 @@ final class DestinationStore: ObservableObject {
             didChange = true
         }
 
-        if let filenameFormat {
+        if let filenameFormat, filenameFormat != destination.filenameFormat {
             let trimmed = filenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty, destination.filenameFormat != trimmed {
                 destination.filenameFormat = trimmed
