@@ -40,11 +40,11 @@ The quietest local-first quick-capture surface on macOS: open the app and you ar
 **Not current product surface (do not design as if shipped):**
 - In-app font size / font family switching.
 - Backspace lock, focus timer, and AI chat (ChatGPT/Claude) chrome.
-- In-app video recording entry from the main writing chrome (recording implementation may still exist in the codebase; it is not a confirmed user-facing capability of the current nav).
+- In-app video recording or speech transcription. Existing videos and their saved transcripts remain available.
 
 **Technical constraints:**
 - Local-first; no backend.
-- App sandbox with camera/mic/speech entitlements historically used for video journaling; treat recording as undecided for UX until re-exposed.
+- App Sandbox with user-selected file access and app-scoped bookmarks; existing video playback does not request camera, microphone, or speech recognition access.
 - Minimum macOS version: 14.0.
 
 ## Brand Commitments

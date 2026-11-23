@@ -407,9 +407,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Quick Note";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Quick Note uses speech recognition to show live captions while recording.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -454,9 +451,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Quick Note";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Quick Note uses speech recognition to show live captions while recording.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
