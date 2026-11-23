@@ -41,4 +41,23 @@ struct HistorySearchTests {
         let notes = ["one", "two"]
         #expect(HistorySearch.filter(notes, query: " ", title: { $0 }, body: { $0 }) == notes)
     }
+
+    @Test func snippetShowsCaseInsensitiveBodyMatchInContext() {
+        let body = "\nLaunch\n\nA long introduction to the proposal, then a café\nmeeting."
+        let snippet = HistorySearch.snippet(query: "launch CAFE", body: body, droppingTitleLine: true)
+        #expect(snippet == "… proposal, then a café meeting.")
+    }
+
+    @Test func titleOnlyMatchDoesNotRepeatTheTitleAsASnippet() {
+        #expect(HistorySearch.snippet(query: "Launch", body: "Launch\nRemember the venue", droppingTitleLine: true) == nil)
+        #expect(HistorySearch.snippet(query: "CAFE", body: "Meet at the café.", droppingTitleLine: false) == "Meet at the café.")
+        #expect(HistorySearch.snippet(query: " ", body: "A note", droppingTitleLine: false) == nil)
+    }
+
+    @Test func sameCanonicalFilenameInTwoDestinationsHasDistinctResultIDs() {
+        let entry = HumanEntry(id: UUID(), date: "", filename: "same.md", previewText: "", entryType: .text)
+        let first = HistoryResult(destinationID: UUID(), destinationLabel: "Personal", entry: entry)
+        let second = HistoryResult(destinationID: UUID(), destinationLabel: "Work", entry: entry)
+        #expect(first.id != second.id)
+    }
 }

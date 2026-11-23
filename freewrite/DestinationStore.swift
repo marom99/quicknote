@@ -223,6 +223,31 @@ final class DestinationStore: ObservableObject {
         return videosURL
     }
 
+    static func withHistoryReadAccess<Result>(
+        to destination: SaveDestination,
+        fileManager: FileManager = .default,
+        read: (URL) -> Result?
+    ) -> Result? {
+        if destination.isDefault {
+            guard let parent = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+            let current = parent.appendingPathComponent(defaultFolderName, isDirectory: true)
+            let directory = fileManager.fileExists(atPath: current.path)
+                ? current : parent.appendingPathComponent(legacyDefaultFolderName, isDirectory: true)
+            return read(directory)
+        }
+
+        guard let bookmark = destination.bookmarkData else { return nil }
+        var stale = false
+        guard let directory = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope, .withoutUI, .withoutMounting],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        ), directory.startAccessingSecurityScopedResource() else { return nil }
+        defer { directory.stopAccessingSecurityScopedResource() }
+        return read(directory)
+    }
+
     @discardableResult
     func activateDestination(id: UUID, fileManager: FileManager = .default) -> DestinationAccessResult {
         guard destinations.contains(where: { $0.id == id }) else {
