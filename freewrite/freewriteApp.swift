@@ -205,7 +205,7 @@ enum WindowChrome {
 struct WindowTitleAccessor: NSViewRepresentable {
     let title: String
     let isDark: Bool
-    let prepareToClose: () -> Bool
+    let prepareToClose: (@escaping () -> Void) -> Bool
 
     final class HostView: NSView {
         let closeDelegate = EditorWindowCloseDelegate()
@@ -248,11 +248,11 @@ struct WindowTitleAccessor: NSViewRepresentable {
 
 final class EditorWindowCloseDelegate: NSObject, NSWindowDelegate {
     weak var forwardedDelegate: NSWindowDelegate?
-    var prepareToClose: () -> Bool = { true }
+    var prepareToClose: (@escaping () -> Void) -> Bool = { _ in true }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard forwardedDelegate?.windowShouldClose?(sender) != false else { return false }
-        return prepareToClose()
+        return prepareToClose { [weak sender] in sender?.close() }
     }
 
     override func responds(to selector: Selector!) -> Bool {
@@ -312,7 +312,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         for window in sender.windows {
-            if let delegate = window.delegate as? EditorWindowCloseDelegate, !delegate.prepareToClose() {
+            if let delegate = window.delegate as? EditorWindowCloseDelegate,
+               !delegate.prepareToClose({ sender.terminate(nil) }) {
                 sender.activate(ignoringOtherApps: true)
                 window.deminiaturize(nil)
                 window.makeKeyAndOrderFront(nil)

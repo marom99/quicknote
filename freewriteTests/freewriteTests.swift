@@ -21,6 +21,11 @@ private final class TestWindowCloseDelegate: NSObject, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool { allowsClose }
 }
 
+private final class CloseTrackingWindow: NSWindow {
+    private(set) var closeCount = 0
+    override func close() { closeCount += 1 }
+}
+
 struct freewriteTests {
 
     @Test @MainActor func editorWindowCloseRequiresBothApprovalAndASuccessfulSave() {
@@ -32,7 +37,7 @@ struct freewriteTests {
         closeDelegate.forwardedDelegate = existingDelegate
         var saveAttempts = 0
         var canSave = false
-        closeDelegate.prepareToClose = {
+        closeDelegate.prepareToClose = { _ in
             saveAttempts += 1
             return canSave
         }
@@ -47,6 +52,23 @@ struct freewriteTests {
         canSave = true
         #expect(closeDelegate.windowShouldClose(window))
         #expect(saveAttempts == 2)
+    }
+
+    @Test @MainActor func editorWindowCloseWaitsForExplicitDiscardWhenSaveFails() {
+        let window = CloseTrackingWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let delegate = EditorWindowCloseDelegate()
+        var discardChanges: (() -> Void)?
+        delegate.prepareToClose = { continuation in
+            discardChanges = continuation
+            return false
+        }
+
+        #expect(!delegate.windowShouldClose(window))
+        #expect(window.closeCount == 0)
+
+        discardChanges?()
+        #expect(window.closeCount == 1)
     }
 
     @Test func appKeepsItsBundleIdentityWithoutRecordingUsageDescriptions() {

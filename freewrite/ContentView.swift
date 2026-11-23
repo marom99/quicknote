@@ -572,7 +572,7 @@ struct ContentView: View {
     @State private var trashNoticeID = UUID()
     @State private var trashError: String? = nil
     @State private var noteOpenError: String? = nil
-    @State private var noteSaveError: String? = nil
+    @State private var noteSaveFailure: NoteSaveFailure?
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var didCopyTranscript: Bool = false
@@ -1025,13 +1025,18 @@ struct ContentView: View {
     }
 
     private enum EntryDeparture {
-        case ready, captureSaved, failed
+        case ready, captureSaved, failed(filename: String)
+    }
+
+    private struct NoteSaveFailure {
+        let filename: String
+        let text: String
+        let discard: () -> Void
     }
 
     private func finalizeCaptureSession(draftFilename: String) -> EntryDeparture {
         guard let documentsDirectory = getDocumentsDirectory() else {
-            noteSaveError = draftFilename
-            return .failed
+            return .failed(filename: draftFilename)
         }
 
         let trimmed = normalizedCaptureContent(text)
@@ -1044,8 +1049,7 @@ struct ContentView: View {
 
         guard let entry = entries.first(where: { $0.filename == draftFilename }),
               saveEntry(entry: entry, updatePreview: true) else {
-            noteSaveError = draftFilename
-            return .failed
+            return .failed(filename: draftFilename)
         }
 
         let format = destinationStore.activeDestination?.newNoteFilenameFormat ?? .date
@@ -1066,8 +1070,7 @@ struct ContentView: View {
 
             if finalFilename != draftFilename {
                 guard moveCaptureFile(from: draftFilename, to: finalFilename, in: documentsDirectory) else {
-                    noteSaveError = draftFilename
-                    return .failed
+                    return .failed(filename: draftFilename)
                 }
                 updateEntryFilename(from: draftFilename, to: finalFilename)
             }
@@ -1369,7 +1372,9 @@ struct ContentView: View {
             }
         }
 
-        guard prepareToLeaveEntry() else { return }
+        guard prepareToLeaveEntry(onDiscard: {
+            discardEditorChanges(then: saveDestinationSettingsDraft)
+        }) else { return }
 
         if settingsSaveMode == .existing,
            let filename = settingsExistingNoteFilename,
@@ -1402,7 +1407,11 @@ struct ContentView: View {
     private func selectEntry(_ entry: HumanEntry) {
         guard selectedEntryId != entry.id,
               let targetEntry = entries.first(where: { $0.id == entry.id }),
-              loadEntry(entry: targetEntry, beforeDisplaying: prepareToLeaveEntry) else { return }
+              loadEntry(entry: targetEntry, beforeDisplaying: {
+                  prepareToLeaveEntry(onDiscard: {
+                      discardEditorChanges { selectEntry(entry) }
+                  })
+              }) else { return }
 
         if targetEntry.entryType == .text {
             DispatchQueue.main.async {
@@ -1411,8 +1420,21 @@ struct ContentView: View {
         }
     }
 
-    private func prepareToLeaveEntry() -> Bool {
-        finishEditingEntry() != .failed
+    private func prepareToLeaveEntry(onDiscard: @escaping () -> Void) -> Bool {
+        allowDeparture(finishEditingEntry(), onDiscard: onDiscard)
+    }
+
+    private func allowDeparture(_ departure: EntryDeparture, onDiscard: @escaping () -> Void) -> Bool {
+        guard case let .failed(filename) = departure else { return true }
+        if noteSaveFailure == nil {
+            noteSaveFailure = NoteSaveFailure(filename: filename, text: text, discard: onDiscard)
+        }
+        return false
+    }
+
+    private func discardEditorChanges(then action: () -> Void) {
+        beginFreshCaptureSession(clearText: true)
+        action()
     }
 
     private func finishEditingEntry() -> EntryDeparture {
@@ -1426,8 +1448,7 @@ struct ContentView: View {
                 noteSaveState.hasUnsavedChanges(text, at: directory.appendingPathComponent(currentEntry.filename))
             } ?? true
             if hasUnsavedChanges {
-                noteSaveError = currentEntry.filename
-                return .failed
+                return .failed(filename: currentEntry.filename)
             }
         }
         return .ready
@@ -1447,7 +1468,10 @@ struct ContentView: View {
     }
 
     private func switchToDestination(id: UUID) {
-        guard id != destinationStore.activeDestinationId, prepareToLeaveEntry() else { return }
+        guard id != destinationStore.activeDestinationId,
+              prepareToLeaveEntry(onDiscard: {
+                  discardEditorChanges { switchToDestination(id: id) }
+              }) else { return }
 
         destinationStore.activateDestination(id: id)
         if showingDestinationSettings {
@@ -2118,12 +2142,21 @@ struct ContentView: View {
             Text(noteOpenError ?? "")
         }
         .alert("Couldn't save note", isPresented: Binding(
-            get: { noteSaveError != nil },
-            set: { if !$0 { noteSaveError = nil } }
-        )) {
-            Button("OK") { noteSaveError = nil }
-        } message: {
-            Text("\(noteSaveError ?? "")\nYour text is still in the editor. Restore access to the note or copy your text to keep it.")
+            get: { noteSaveFailure != nil },
+            set: { if !$0 { noteSaveFailure = nil } }
+        ), presenting: noteSaveFailure) { failure in
+            Button("Keep Editing", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+            Button("Copy Text") {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(failure.text, forType: .string)
+            }
+            Button("Discard Changes", role: .destructive) {
+                DispatchQueue.main.async { failure.discard() }
+            }
+        } message: { failure in
+            Text("\(failure.filename)\nYour text is still in the editor. Discarding changes continues without saving your edits.")
         }
         .focusedSceneValue(\.editorCommandActions, EditorCommandActions(
             newEntry: createNewEntry,
@@ -2137,7 +2170,9 @@ struct ContentView: View {
         .background(WindowTitleAccessor(
             title: currentEntryTitle,
             isDark: colorScheme == .dark,
-            prepareToClose: prepareToLeaveEntry
+            prepareToClose: { continuation in
+                prepareToLeaveEntry(onDiscard: { discardEditorChanges(then: continuation) })
+            }
         ))
         .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
         .onChange(of: selectedEntryId) { _, newId in
@@ -2394,14 +2429,20 @@ struct ContentView: View {
         editorFocusRequest = UUID()
         savedConfirmation = nil
         let departure = finishEditingEntry()
-        guard departure != .failed else { return }
+        guard allowDeparture(departure, onDiscard: {
+            discardEditorChanges(then: createNewEntry)
+        }) else { return }
 
         let didSave: Bool
         // Rolling / Existing: re-bind to current period/target and append a session separator.
         if activeSaveMode == .rolling || activeSaveMode == .existing {
             didSave = bindToResolvedWriteTarget(appendSeparator: true)
         } else {
-            didSave = departure == .captureSaved
+            if case .captureSaved = departure {
+                didSave = true
+            } else {
+                didSave = false
+            }
             beginFreshCaptureSession(clearText: true)
         }
 
@@ -2804,8 +2845,12 @@ struct ContentView: View {
         guard var trash = historyTrash,
               trashDestinationID == destinationStore.activeDestinationId else { return }
         do {
-            if trashedEntryWasSelected, !prepareToLeaveEntry() {
-                return
+            if trashedEntryWasSelected {
+                let noticeID = trashNoticeID
+                guard prepareToLeaveEntry(onDiscard: {
+                    guard historyTrash != nil, trashNoticeID == noticeID else { return }
+                    discardEditorChanges(then: undoHistoryTrash)
+                }) else { return }
             }
             let restoredURLs = try trash.restore(finalizeCaptureDrafts: true)
             historyTrash = nil
