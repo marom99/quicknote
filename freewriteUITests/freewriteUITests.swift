@@ -221,6 +221,49 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testTypingAfterSavingDestinationSettingsThenSelectingHistoryNote() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let seed = "settings focus seed \(UUID().uuidString.prefix(8).lowercased())"
+        let editor = app.textViews["mainEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        app.typeText(seed)
+        app.buttons["New Note"].click()
+
+        app.typeKey(",", modifierFlags: .command)
+        let name = app.textFields["Display name"]
+        let save = app.buttons["Save"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        let originalName = try XCTUnwrap(name.value as? String)
+        addTeardownBlock { @MainActor () async throws in
+            app.typeKey(",", modifierFlags: .command)
+            if name.waitForExistence(timeout: 5), (name.value as? String) != originalName {
+                name.click()
+                name.typeKey("a", modifierFlags: .command)
+                name.typeText(originalName)
+                save.click()
+            }
+        }
+
+        name.click()
+        name.typeText(" edited")
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+
+        app.buttons["historyButton"].click()
+        let row = app.staticTexts[seed]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.click()
+        XCTAssertEqual(editor.value as? String, seed)
+        XCTAssertTrue(hasKeyboardFocus(editor), "Editor lost focus after saving settings and selecting a History note")
+
+        app.typeText("ZZ")
+        XCTAssertTrue((editor.value as? String ?? "").contains("ZZ"), "Typed text did not reach the editor")
+    }
+
+    @MainActor
     func testHistorySearchMatchesTitleAndBody() throws {
         let app = XCUIApplication()
         app.launch()
