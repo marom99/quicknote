@@ -146,6 +146,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
     var quickCaptureFocusRequest: UUID?
+    var selectionFocusRequest: UUID?
 
     let editorID: UUID?
     let allowsAutomaticFocus: Bool
@@ -272,6 +273,17 @@ struct FreewriteTextEditor: NSViewRepresentable {
             }
         }
 
+        if let selectionFocusRequest,
+           selectionFocusRequest != context.coordinator.lastSelectionFocusRequest {
+            context.coordinator.lastSelectionFocusRequest = selectionFocusRequest
+            // A History row click must pull focus back from the History search field.
+            DispatchQueue.main.async { [weak scrollView] in
+                guard let textView = scrollView?.documentView as? NSTextView,
+                      let window = textView.window, window.isKeyWindow else { return }
+                window.makeFirstResponder(textView)
+            }
+        }
+
         context.coordinator.publishScrollMetrics()
     }
 
@@ -289,6 +301,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastAppliedScrollRequest: EditorScrollRequest?
         var lastQuickCaptureFocusRequest: UUID?
+        var lastSelectionFocusRequest: UUID?
         var lastConfiguredEditorID: UUID?
         var lastFocusRequest: UUID?
         var lastAppliedCaretEndRequest: UUID?
@@ -495,6 +508,7 @@ struct ContentView: View {
     @State private var editorScrollRequest: EditorScrollRequest?
     @State private var editorFocusRequest = UUID()
     @State private var quickCaptureFocusRequest: UUID?
+    @State private var historySelectionFocusRequest: UUID?
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
@@ -1634,6 +1648,7 @@ struct ContentView: View {
                         text: $text,
                         scrollRequest: $editorScrollRequest,
                         quickCaptureFocusRequest: quickCaptureFocusRequest,
+                        selectionFocusRequest: historySelectionFocusRequest,
                         editorID: selectedEntryId,
                         allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
                         focusRequest: editorFocusRequest,
@@ -1945,7 +1960,9 @@ struct ContentView: View {
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    historySearchFocused = false
                                     selectEntry(entry)
+                                    historySelectionFocusRequest = UUID()
                                 }
                                 .overlay(alignment: .trailing) {
                                     if hoveredEntryId == entry.id {

@@ -114,6 +114,16 @@ final class freewriteUITests: XCTestCase {
         app.buttons["historySearchClear"].click()
         XCTAssertTrue(app.staticTexts[firstTitle].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts[secondTitle].exists)
+
+        search.click()
+        search.typeText("zucchini\(tag)")
+        let match = app.staticTexts[firstTitle]
+        XCTAssertTrue(match.waitForExistence(timeout: 5))
+        match.click()
+        XCTAssertTrue(hasKeyboardFocus(editor), "Editor lost focus after selecting a filtered History note")
+        app.typeText("QQ")
+        XCTAssertEqual(search.value as? String, "zucchini\(tag)", "Typing after selection went into History search")
+        XCTAssertTrue((editor.value as? String ?? "").contains("QQ"), "Typed text did not reach the editor")
     }
 
     private func hasKeyboardFocus(_ element: XCUIElement) -> Bool {
