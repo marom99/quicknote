@@ -148,6 +148,40 @@ struct HistoryTrashTests {
         }
     }
 
+    @Test func undoUsesTheExactLocationReturnedByFinder() throws {
+        try withDirectory { directory in
+            let note = directory.appendingPathComponent("note.md")
+            let recycled = directory.appendingPathComponent("note 2.md")
+            try "Original".write(to: note, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash { url in
+                #expect(url == note)
+                try FileManager.default.moveItem(at: url, to: recycled)
+                return recycled
+            }
+
+            try trash.moveToTrash(note)
+
+            #expect(trash.items.first?.trashedURL == recycled)
+            try trash.restore()
+            #expect(try String(contentsOf: note, encoding: .utf8) == "Original")
+        }
+    }
+
+    @Test func finderUnavailableFallsBackToTrashWithUndo() throws {
+        try withDirectory { directory in
+            let note = directory.appendingPathComponent("note.md")
+            try "Original".write(to: note, atomically: true, encoding: .utf8)
+            var trash = HistoryTrash { _ in nil }
+
+            try trash.moveToTrash(note)
+            defer { try? trash.restore() }
+
+            #expect(!FileManager.default.fileExists(atPath: note.path))
+            try trash.restore()
+            #expect(try String(contentsOf: note, encoding: .utf8) == "Original")
+        }
+    }
+
     @Test func emptyRestoreIsHarmless() throws {
         var trash = HistoryTrash()
         try trash.restore()

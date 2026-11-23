@@ -2684,7 +2684,7 @@ struct ContentView: View {
         guard let documentsDirectory = getDocumentsDirectory() else { return }
         let fileURL = documentsDirectory.appendingPathComponent(entry.filename)
 
-        var trash = HistoryTrash()
+        var trash = HistoryTrash(recycleWithFinder: FinderTrash.recycle)
         do {
             try trash.moveToTrash(fileURL)
             if let videoFilename = resolvedVideoFilename(for: entry) {

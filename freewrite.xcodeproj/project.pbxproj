@@ -406,6 +406,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Quick Note uses Finder to move notes to the Trash so you can put them back after Undo expires.";
 				INFOPLIST_KEY_CFBundleDisplayName = "Quick Note";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries.";
@@ -453,6 +454,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Quick Note uses Finder to move notes to the Trash so you can put them back after Undo expires.";
 				INFOPLIST_KEY_CFBundleDisplayName = "Quick Note";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries.";

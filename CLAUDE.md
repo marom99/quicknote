@@ -360,6 +360,8 @@ If the unbound target already contains text (for example, restored from Trash), 
 
 ## Permissions
 
+History deletion asks macOS to allow Finder Automation so Finder records the original location for Put Back. With permission denied, Quick Note still moves the item to Trash and offers its in-app Undo, but Finder may not offer Put Back. The sandbox exception is limited to `com.apple.finder`; Finder returns the exact trashed alias so Undo can restore it even when Trash already contains an item with that name.
+
 Required entitlements in `freewrite.entitlements`:
 
 ```xml
