@@ -117,6 +117,28 @@ enum DestinationWriteTarget {
         return "\(basename).md"
     }
 
+    /// Root-level, visible Markdown notes an Existing destination can bind to, sorted by name.
+    static func existingNoteChoices(in directory: URL, fileManager: FileManager = .default) -> [String] {
+        let urls = (try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return urls
+            .filter { url in
+                url.pathExtension.lowercased() == "md"
+                    && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            }
+            .map(\.lastPathComponent)
+            .filter { !isCaptureDraftFilename($0) && validatedBasename($0) != nil }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Filename for a typed Existing note name, or nil when it is not a root-level basename.
+    static func existingNoteFilename(fromInput input: String) -> String? {
+        validatedBasename(input).map(markdownFilename(fromBasename:))
+    }
+
     // MARK: - Capture-per-session (New note)
 
     static let captureDraftPrefix = ".quicknote-capture-"

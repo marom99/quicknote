@@ -5,6 +5,32 @@ import Testing
 @testable import freewrite
 
 struct DestinationWriteTargetTests {
+    @Test func existingNoteChoicesListOnlyVisibleRootMarkdownNotes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("Videos/folder.md"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["journal.md", "Ideas 10.md", "Ideas 2.MD", "notes.txt", ".hidden.md",
+                     DestinationWriteTarget.captureDraftFilename(captureId: UUID())] {
+            try "x".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try "x".write(to: directory.appendingPathComponent("Videos/nested.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("dir.md"), withIntermediateDirectories: true)
+
+        #expect(DestinationWriteTarget.existingNoteChoices(in: directory) == ["Ideas 2.MD", "Ideas 10.md", "journal.md"])
+        #expect(DestinationWriteTarget.existingNoteChoices(in: directory.appendingPathComponent("missing")).isEmpty)
+    }
+
+    @Test func existingNoteFilenameFromInputRequiresRootBasename() {
+        #expect(DestinationWriteTarget.existingNoteFilename(fromInput: " journal ") == "journal.md")
+        #expect(DestinationWriteTarget.existingNoteFilename(fromInput: "journal.md") == "journal.md")
+        #expect(DestinationWriteTarget.existingNoteFilename(fromInput: "") == nil)
+        #expect(DestinationWriteTarget.existingNoteFilename(fromInput: "a/b.md") == nil)
+        #expect(DestinationWriteTarget.existingNoteFilename(fromInput: "..") == nil)
+    }
+
     @Test func recoveryProtectsAllWindowsLiveDraftsUntilRegistrationEnds() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let otherDirectory = directory.appendingPathComponent("other")
