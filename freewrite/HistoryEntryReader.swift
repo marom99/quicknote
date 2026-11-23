@@ -25,8 +25,7 @@ struct HistoryEntryReader {
         } catch {
             return nil
         }
-        let parsed = Self.parseCanonicalFilename(filename)
-        let date = parsed?.timestamp ?? Self.modificationDate(for: url, fileManager: fileManager)
+        let date = Self.canonicalTimestamp(for: filename) ?? Self.modificationDate(for: url, fileManager: fileManager)
         let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
         let videoDirectory = directory.appendingPathComponent("Videos", isDirectory: true)
         let videoEntryDirectory = videoDirectory.appendingPathComponent(
@@ -40,7 +39,7 @@ struct HistoryEntryReader {
         ) : nil
 
         return HumanEntry(
-            id: parsed?.uuid ?? DestinationWriteTarget.stableUUID(fromPath: url.standardizedFileURL.path),
+            id: DestinationWriteTarget.stableUUID(fromPath: url.standardizedFileURL.path),
             date: DestinationWriteTarget.displayDateString(from: date),
             filename: filename,
             previewText: hasVideo ? Self.videoTitle(from: transcript) : body.map(HistoryRowFormatting.title(from:)) ?? filename,
@@ -64,20 +63,19 @@ struct HistoryEntryReader {
         (try? fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? Date()
     }
 
-    static func parseCanonicalFilename(_ filename: String) -> (uuid: UUID, timestamp: Date)? {
+    static func canonicalTimestamp(for filename: String) -> Date? {
         guard filename.hasPrefix("["),
               filename.hasSuffix("].md"),
               let divider = filename.range(of: "]-[") else { return nil }
 
         let uuidStart = filename.index(after: filename.startIndex)
-        guard let uuid = UUID(uuidString: String(filename[uuidStart..<divider.lowerBound])) else { return nil }
+        guard UUID(uuidString: String(filename[uuidStart..<divider.lowerBound])) != nil else { return nil }
 
         let timestampEnd = filename.index(filename.endIndex, offsetBy: -4)
         guard divider.upperBound <= timestampEnd else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        guard let date = formatter.date(from: String(filename[divider.upperBound..<timestampEnd])) else { return nil }
-        return (uuid, date)
+        return formatter.date(from: String(filename[divider.upperBound..<timestampEnd]))
     }
 }

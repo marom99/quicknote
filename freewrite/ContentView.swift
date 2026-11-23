@@ -2338,7 +2338,7 @@ struct ContentView: View {
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries[index].previewText = HistoryRowFormatting.title(from: content)
                 entries[index].searchableBody = content
-                if HistoryEntryReader.parseCanonicalFilename(entry.filename) == nil {
+                if HistoryEntryReader.canonicalTimestamp(for: entry.filename) == nil {
                     entries[index].timestamp = HistoryEntryReader.modificationDate(for: fileURL)
                 }
             }

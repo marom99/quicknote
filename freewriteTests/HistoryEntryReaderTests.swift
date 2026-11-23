@@ -3,6 +3,29 @@ import Testing
 @testable import freewrite
 
 struct HistoryEntryReaderTests {
+    @Test func legacyNotesWithTheSameEmbeddedUUIDUseDistinctFileIdentities() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let otherJournal = directory.appendingPathComponent("Other")
+        try FileManager.default.createDirectory(at: otherJournal, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacyID = UUID()
+        let filename = "[\(legacyID)]-[2026-02-20-08-01-04].md"
+        let files = [
+            directory.appendingPathComponent(filename),
+            directory.appendingPathComponent("[\(legacyID)]-[2026-02-21-08-01-04].md"),
+            otherJournal.appendingPathComponent(filename)
+        ]
+        for file in files { try "Same title and body".write(to: file, atomically: true, encoding: .utf8) }
+        let activeReader = HistoryEntryReader(directory: directory)
+        let otherReader = HistoryEntryReader(directory: otherJournal)
+        let entries = try activeReader.entries() + otherReader.entries()
+
+        #expect(entries.count == 3)
+        #expect(Set(entries.map(\.id)).count == 3)
+        #expect(entries.first?.filename == files[1].lastPathComponent)
+        #expect(try activeReader.entry(at: files[0])?.id == activeReader.entries().last?.id)
+    }
+
     @Test func scansAuthorizedRootWithoutCreatingOrRecoveringAnything() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
