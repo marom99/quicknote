@@ -117,7 +117,8 @@ enum DestinationWriteTarget {
         return "\(basename).md"
     }
 
-    /// Root-level, visible Markdown notes an Existing destination can bind to, sorted by name.
+    /// Root-level, visible text notes an Existing destination can bind to, sorted by name.
+    /// Skips video metadata files and names `resolve` would normalize to a different file.
     static func existingNoteChoices(in directory: URL, fileManager: FileManager = .default) -> [String] {
         let urls = (try? fileManager.contentsOfDirectory(
             at: directory,
@@ -130,8 +131,26 @@ enum DestinationWriteTarget {
                     && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
             }
             .map(\.lastPathComponent)
-            .filter { !isCaptureDraftFilename($0) && validatedBasename($0) != nil }
+            .filter { filename in
+                !isCaptureDraftFilename(filename)
+                    && existingNoteFilename(fromInput: filename) == filename
+                    && !hasVideoAsset(forNote: filename, in: directory, fileManager: fileManager)
+            }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private static func hasVideoAsset(forNote filename: String, in directory: URL, fileManager: FileManager) -> Bool {
+        let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
+        guard videoFilename != filename else { return false }
+        let videosDirectory = directory.appendingPathComponent("Videos", isDirectory: true)
+        let candidates = [
+            videosDirectory
+                .appendingPathComponent((videoFilename as NSString).deletingPathExtension, isDirectory: true)
+                .appendingPathComponent(videoFilename),
+            videosDirectory.appendingPathComponent(videoFilename),
+            directory.appendingPathComponent(videoFilename),
+        ]
+        return candidates.contains { fileManager.fileExists(atPath: $0.path) }
     }
 
     /// Filename for a typed Existing note name, or nil when it is not a root-level basename.

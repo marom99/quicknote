@@ -12,7 +12,18 @@ struct DestinationWriteTargetTests {
             withIntermediateDirectories: true
         )
         defer { try? FileManager.default.removeItem(at: directory) }
+        let videoBase = "[6910BBDE-75FC-415C-ABB9-C76644B037B2]-[2026-02-20-08-01-04]"
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("Videos/\(videoBase)"),
+            withIntermediateDirectories: true
+        )
+        try "x".write(
+            to: directory.appendingPathComponent("Videos/\(videoBase)/\(videoBase).mov"),
+            atomically: true,
+            encoding: .utf8
+        )
         for name in ["journal.md", "Ideas 10.md", "Ideas 2.MD", "notes.txt", ".hidden.md",
+                     "twice.md.md", " leading.md", "\(videoBase).md",
                      DestinationWriteTarget.captureDraftFilename(captureId: UUID())] {
             try "x".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
         }
