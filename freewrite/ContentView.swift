@@ -1962,7 +1962,11 @@ struct ContentView: View {
                                 .onTapGesture {
                                     historySearchFocused = false
                                     selectEntry(entry)
-                                    historySelectionFocusRequest = UUID()
+                                    if entry.entryType == .text {
+                                        historySelectionFocusRequest = UUID()
+                                        // One-shot: an editor created later must not replay it.
+                                        DispatchQueue.main.async { historySelectionFocusRequest = nil }
+                                    }
                                 }
                                 .overlay(alignment: .trailing) {
                                     if hoveredEntryId == entry.id {
