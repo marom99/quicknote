@@ -209,8 +209,8 @@ struct CaptureDraftTests {
         #expect(try f.store.load() == nil)
     }
 
-    @Test(arguments: [false, true])
-    func retriesPartialAppendOnlyIfNoOtherBytesWereAdded(anotherAppAppended: Bool) throws {
+    @Test(arguments: [false, true], [false, true])
+    func resumesIncompleteAppendOnlyWithConfirmation(anotherAppAppended: Bool, partialCapture: Bool) throws {
         let f = try Fixture()
         defer { f.cleanUp() }
         var draft = f.draft(.existing)
@@ -219,7 +219,8 @@ struct CaptureDraftTests {
         let previous = Data("Original".utf8)
         let addition = Data((draft.separator + draft.text).utf8)
         let complete = previous + addition
-        var partial = previous + addition.prefix(draft.separator.utf8.count + 1)
+        var partial = previous
+        if partialCapture { partial += addition.prefix(draft.separator.utf8.count + 1) }
         if anotherAppAppended { partial += Data("Other app's edits".utf8) }
         draft.pendingWrite = .init(filename: file.lastPathComponent, previousDigest: Data(SHA256.hash(data: previous)),
                                    savedDigest: Data(SHA256.hash(data: complete)), previousByteCount: previous.count)
@@ -228,14 +229,23 @@ struct CaptureDraftTests {
 
         let restored = try f.store.load()
         var recovered = try #require(restored)
+        let observedDigest = Data(SHA256.hash(data: partial))
         if anotherAppAppended {
             #expect(throws: CaptureDraftStore.SaveError.changedTarget) {
-                try f.store.save(&recovered, in: f.destination)
+                try f.store.save(&recovered, in: f.destination, confirmedPartial: observedDigest)
             }
             #expect(try Data(contentsOf: file) == partial)
             #expect(try f.store.load() == draft)
         } else {
-            #expect(try f.store.save(&recovered, in: f.destination) == file)
+            #expect(throws: CaptureDraftStore.SaveError.partialAppend(observedDigest)) {
+                try f.store.save(&recovered, in: f.destination)
+            }
+            #expect(throws: CaptureDraftStore.SaveError.partialAppend(observedDigest)) {
+                try f.store.save(&recovered, in: f.destination, confirmedPartial: Data())
+            }
+            #expect(try Data(contentsOf: file) == partial)
+            #expect(try f.store.load() == draft)
+            #expect(try f.store.save(&recovered, in: f.destination, confirmedPartial: observedDigest) == file)
             #expect(try Data(contentsOf: file) == complete)
             #expect(try f.store.load() == nil)
         }

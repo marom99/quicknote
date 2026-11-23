@@ -62,8 +62,9 @@ struct CaptureDraftStore {
         } catch let error as CocoaError where error.code == .fileNoSuchFile {}
     }
 
-    enum SaveError: LocalizedError {
+    enum SaveError: LocalizedError, Equatable {
         case unavailable, missingTarget, changedTarget, unsavedEditor, invalidText
+        case partialAppend(Data)
 
         var errorDescription: String? {
             switch self {
@@ -72,19 +73,21 @@ struct CaptureDraftStore {
             case .changedTarget: "The note changed during the save. Copy your draft to keep both versions."
             case .unsavedEditor: "The same note has unsaved edits in the main window."
             case .invalidText: "The original note isn’t UTF-8 text."
+            case .partialAppend: "The capture is incomplete in the note. Resume Append adds the missing text."
             }
         }
     }
 
     /// Resolve the snapshot, not the active settings, and keep its scope open through the write.
-    func save(_ draft: inout CaptureDraft, canWrite: (URL) -> Bool) throws -> URL? {
+    func save(_ draft: inout CaptureDraft, confirmedPartial: Data? = nil, canWrite: (URL) -> Bool) throws -> URL? {
         guard !draft.isBlank else {
             try discard()
             return nil
         }
 
         if draft.destination.isDefault {
-            return try save(&draft, in: DestinationStore.defaultDocumentsURL(), canWrite: canWrite)
+            return try save(&draft, in: DestinationStore.defaultDocumentsURL(),
+                            confirmedPartial: confirmedPartial, canWrite: canWrite)
         }
 
         guard let bookmark = draft.destination.bookmarkData else { throw SaveError.unavailable }
@@ -93,10 +96,11 @@ struct CaptureDraftStore {
                                        relativeTo: nil, bookmarkDataIsStale: &stale),
               directory.startAccessingSecurityScopedResource() else { throw SaveError.unavailable }
         defer { directory.stopAccessingSecurityScopedResource() }
-        return try save(&draft, in: directory, canWrite: canWrite)
+        return try save(&draft, in: directory, confirmedPartial: confirmedPartial, canWrite: canWrite)
     }
 
-    func save(_ draft: inout CaptureDraft, in directory: URL, canWrite: (URL) -> Bool = { _ in true }) throws -> URL? {
+    func save(_ draft: inout CaptureDraft, in directory: URL, confirmedPartial: Data? = nil,
+              canWrite: (URL) -> Bool = { _ in true }) throws -> URL? {
         guard !draft.isBlank else {
             try discard()
             return nil
@@ -134,19 +138,19 @@ struct CaptureDraftStore {
                 try discard()
                 return target
             }
-            if originalDigest != pending.previousDigest {
-                guard let original, let previousByteCount = pending.previousByteCount,
-                      let previousDigest = pending.previousDigest,
-                      previousByteCount >= 0, previousByteCount < original.count,
-                      digest(original.prefix(previousByteCount)) == previousDigest else {
-                    throw SaveError.changedTarget
-                }
+            if let original, let originalDigest, let previousByteCount = pending.previousByteCount,
+               let previousDigest = pending.previousDigest,
+               previousByteCount >= 0, previousByteCount <= original.count,
+               digest(original.prefix(previousByteCount)) == previousDigest {
                 let partial = original.dropFirst(previousByteCount)
-                // Resume only when the file ends in a byte-for-byte prefix of this capture.
+                // An interrupted append and a user deleting the end of a capture look the same.
                 guard partial.count < addition.count, addition.starts(with: partial) else {
                     throw SaveError.changedTarget
                 }
+                guard confirmedPartial == originalDigest else { throw SaveError.partialAppend(originalDigest) }
                 appendedBytes = partial.count
+            } else if originalDigest != pending.previousDigest {
+                throw SaveError.changedTarget
             }
         }
         if mode == .existing && original == nil { throw SaveError.missingTarget }
@@ -167,6 +171,7 @@ struct CaptureDraftStore {
         }
         guard let pending = draft.pendingWrite else { throw SaveError.changedTarget }
 
+        var writeCompleted = false
         do {
             if let originalDigest {
                 try append(addition.dropFirst(appendedBytes), to: target, after: originalDigest)
@@ -177,11 +182,12 @@ struct CaptureDraftStore {
                 try addition.write(to: staged, options: .atomic)
                 try fileManager.moveItem(at: staged, to: target)
             }
+            writeCompleted = true
             if !matchesSavedPrefix(try read(target), pending: pending, addition: addition) {
                 throw SaveError.changedTarget
             }
         } catch {
-            if (try? read(target).map(digest) == pending.previousDigest) == true {
+            if !writeCompleted, (try? read(target).map(digest) == pending.previousDigest) == true {
                 var retryable = draft
                 retryable.pendingWrite = nil
                 if (try? preserve(retryable)) != nil { draft = retryable }

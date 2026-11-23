@@ -21,6 +21,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
     private lazy var keepDraft = NSButton(title: "Keep Draft", target: self, action: #selector(hideKeepingDraft))
     private lazy var discardDraft = NSButton(title: "Discard…", target: self, action: #selector(confirmDiscard))
     private var draft: CaptureDraft?
+    private var partialAppendDigest: Data?
 
     var canWrite: (URL) -> Bool = { _ in true }
     var didSave: (URL) -> Void = { _ in }
@@ -113,6 +114,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
                 setStatus("The local draft couldn’t be opened. It hasn’t been replaced.")
             }
             done.title = "Done"
+            partialAppendDigest = nil
             offerKeepDraft(false)
             discardDraft.isHidden = true
             panel.appearance = NSAppearance(named: UserDefaults.standard.string(forKey: "colorScheme") == "dark"
@@ -150,10 +152,15 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
     }
 
     private func escape() {
-        if keepDraft.isHidden { finish() } else { hideKeepingDraft() }
+        if keepDraft.isHidden { save(confirmedPartial: nil) } else { hideKeepingDraft() }
     }
 
     @objc private func finish() {
+        save(confirmedPartial: partialAppendDigest)
+    }
+
+    private func save(confirmedPartial: Data?) {
+        partialAppendDigest = nil
         guard var draft else {
             panel.orderOut(nil)
             return
@@ -161,7 +168,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
         editor.unmarkText()
         if draft.pendingWrite == nil { draft.text = editor.string }
         do {
-            let url = try store.save(&draft, canWrite: canWrite)
+            let url = try store.save(&draft, confirmedPartial: confirmedPartial, canWrite: canWrite)
             self.draft = nil
             if let url { didSave(url) }
             panel.orderOut(nil)
@@ -169,7 +176,9 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
             self.draft = draft
             editor.isEditable = draft.pendingWrite == nil
             NSLog("Quick capture save failed: %@", error.localizedDescription)
-            let reason = (error as? CaptureDraftStore.SaveError)?.localizedDescription ?? "Couldn’t save to the destination."
+            let saveError = error as? CaptureDraftStore.SaveError
+            if case .partialAppend(let digest) = saveError { partialAppendDigest = digest }
+            let reason = saveError?.localizedDescription ?? "Couldn’t save to the destination."
             if (try? store.preserve(draft)) != nil {
                 setStatus("\(reason) Your draft is kept on this Mac.")
                 offerKeepDraft(true)
@@ -177,7 +186,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
                 setStatus("\(reason) Keep this panel open or copy your text.")
                 offerKeepDraft(false)
             }
-            done.title = "Retry"
+            done.title = partialAppendDigest == nil ? "Retry" : "Resume Append"
             discardDraft.isHidden = draft.isBlank
             panel.makeFirstResponder(editor)
         }
