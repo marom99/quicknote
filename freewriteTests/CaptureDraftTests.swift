@@ -72,6 +72,20 @@ struct CaptureDraftTests {
         #expect(try String(contentsOf: url, encoding: .utf8) == draft.text)
     }
 
+    @Test func caseAliasesOnlyMatchWhenTheyReferToTheSameFile() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        let original = f.destination.appendingPathComponent("Daily.md")
+        let caseAlias = f.destination.appendingPathComponent("daily.md")
+        try Data().write(to: original)
+        if FileManager.default.fileExists(atPath: caseAlias.path) {
+            #expect(CaptureDraftStore.sameFile(original, caseAlias))
+        } else {
+            try Data().write(to: caseAlias)
+            #expect(!CaptureDraftStore.sameFile(original, caseAlias))
+        }
+    }
+
     @Test(arguments: [DestinationSaveMode.rolling, .existing])
     func appendPreservesTheLatestDestinationText(mode: DestinationSaveMode) throws {
         let f = try Fixture()

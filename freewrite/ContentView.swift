@@ -2425,29 +2425,36 @@ struct ContentView: View {
         savedConfirmationID = UUID()
     }
 
-    private func quickCaptureIsInCurrentDestination(_ url: URL) -> Bool {
-        getDocumentsDirectory()?.resolvingSymlinksInPath().standardizedFileURL.path
-            == url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
+    private func quickCaptureDirectory(for url: URL) -> URL? {
+        guard let directory = getDocumentsDirectory(),
+              CaptureDraftStore.sameFile(directory, url.deletingLastPathComponent()) else { return nil }
+        return directory
     }
 
     private func canAcceptQuickCapture(at url: URL) -> Bool {
-        guard quickCaptureIsInCurrentDestination(url),
+        guard let directory = quickCaptureDirectory(for: url),
               let selected = entries.first(where: { $0.id == selectedEntryId }),
-              selected.entryType == .text, selected.filename == url.lastPathComponent,
-              let directory = getDocumentsDirectory() else { return true }
-        return !noteSaveState.hasUnsavedChanges(text, at: directory.appendingPathComponent(selected.filename))
+              selected.entryType == .text else { return true }
+        let selectedURL = directory.appendingPathComponent(selected.filename)
+        return !CaptureDraftStore.sameFile(selectedURL, url) || !noteSaveState.hasUnsavedChanges(text, at: selectedURL)
     }
 
     private func receiveQuickCapture(at url: URL) {
-        guard quickCaptureIsInCurrentDestination(url),
-              let directory = getDocumentsDirectory(),
-              let updated = humanEntry(from: directory.appendingPathComponent(url.lastPathComponent)) else { return }
-        let index = entries.firstIndex(where: { $0.filename == updated.entry.filename })
-        if let index {
-            if entries[index].id == selectedEntryId && updated.entry.entryType == .text && canAcceptQuickCapture(at: url) {
+        guard let directory = quickCaptureDirectory(for: url) else { return }
+        let index = entries.firstIndex {
+            $0.filename.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame
+                && CaptureDraftStore.sameFile(directory.appendingPathComponent($0.filename), url)
+        }
+        let actualURL = directory.appendingPathComponent(index.map { entries[$0].filename } ?? url.lastPathComponent)
+        guard let updated = humanEntry(from: actualURL) else { return }
+        if let selected = entries.first(where: { $0.id == selectedEntryId }), selected.entryType == .text {
+            let selectedURL = directory.appendingPathComponent(selected.filename)
+            if CaptureDraftStore.sameFile(selectedURL, url), !noteSaveState.hasUnsavedChanges(text, at: selectedURL) {
                 text = updated.content
-                noteSaveState.didLoad(text, from: directory.appendingPathComponent(updated.entry.filename))
+                noteSaveState.didLoad(text, from: selectedURL)
             }
+        }
+        if let index {
             entries[index] = updated.entry
         } else {
             entries.insert(updated.entry, at: 0)

@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 struct CaptureDraft: Codable, Equatable {
@@ -30,6 +31,14 @@ struct CaptureDraftStore {
     static var local: Self {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return Self(url: support.appendingPathComponent("Quick Note/Capture Draft.json"))
+    }
+
+    static func sameFile(_ first: URL, _ second: URL) -> Bool {
+        if first.standardizedFileURL.path == second.standardizedFileURL.path { return true }
+        var lhs = stat()
+        var rhs = stat()
+        return stat(first.path, &lhs) == 0 && stat(second.path, &rhs) == 0
+            && lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino
     }
 
     func load() throws -> CaptureDraft? {
