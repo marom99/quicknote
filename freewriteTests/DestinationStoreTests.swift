@@ -3,6 +3,17 @@ import Testing
 @testable import freewrite
 
 struct DestinationStoreTests {
+    @Test func searchSkipsMissingOrUnresolvableBookmarksWithoutRunningRead() {
+        for bookmark in [nil, Data("invalid-bookmark".utf8)] {
+            let destination = SaveDestination(id: UUID(), displayName: "Unavailable", bookmarkData: bookmark, isDefault: false)
+            let result = DestinationStore.withHistoryReadAccess(to: destination) { _ -> String? in
+                Issue.record("Read should only run within an authorized destination")
+                return "unexpected"
+            }
+            #expect(result == nil)
+        }
+    }
+
     private func makeIsolatedDefaults() -> UserDefaults {
         let suiteName = "DestinationStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

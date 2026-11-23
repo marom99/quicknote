@@ -541,7 +541,11 @@ struct ContentView: View {
     @State private var hoveredEntryId: UUID? = nil
     @State private var showingSidebar = false  // Add this state variable
     @State private var historySearchQuery = ""
-    @FocusState private var historySearchFocused: Bool
+    @State private var historySearchFocusRequest: UUID?
+    @State private var isSearchingNotes = false
+    @State private var historyKeyboardEntryID: HistoryResult.ID?
+    @State private var searchAllDestinations = false
+    @State private var otherDestinationResults: [HistoryResult]?
     @State private var showingDestinationSettings = false
     @State private var hoveredTrashId: UUID? = nil
     @State private var placeholderText: String = ""  // Add this line
@@ -609,6 +613,7 @@ struct ContentView: View {
     private enum DestinationSettingsCloseAction {
         case closeRail
         case openHistory
+        case searchNotes
     }
     
     // Initialize with saved theme preference if available
@@ -692,29 +697,6 @@ struct ContentView: View {
         return getManagedVideoURL(for: filename)
     }
 
-    private func hasVideoAsset(for filename: String) -> Bool {
-        if let managedVideoURL = getManagedVideoURL(for: filename),
-           fileManager.fileExists(atPath: managedVideoURL.path) {
-            return true
-        }
-
-        if let videosDirectory = getVideosDirectory() {
-            let flatVideosURL = videosDirectory.appendingPathComponent(filename)
-            if fileManager.fileExists(atPath: flatVideosURL.path) {
-                return true
-            }
-        }
-
-        if let documentsDirectory = getDocumentsDirectory() {
-            let rootVideosURL = documentsDirectory.appendingPathComponent(filename)
-            if fileManager.fileExists(atPath: rootVideosURL.path) {
-                return true
-            }
-        }
-
-        return false
-    }
-
     private func resolvedVideoFilename(for entry: HumanEntry) -> String? {
         guard entry.entryType == .video else {
             return nil
@@ -777,37 +759,6 @@ struct ContentView: View {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    private func previewTextFromTranscript(_ transcript: String?) -> String {
-        guard let transcript else {
-            return "Video Note"
-        }
-
-        let normalized = transcript
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else {
-            return "Video Note"
-        }
-
-        var preview = String(normalized.prefix(10))
-
-        while let last = preview.last, (!last.isLetter && !last.isNumber) {
-            preview.removeLast()
-        }
-
-        if preview.isEmpty {
-            return "Video Note"
-        }
-
-        return preview + "..."
-    }
-
-    private func videoPreviewText(for videoFilename: String) -> String {
-        previewTextFromTranscript(loadTranscriptText(for: videoFilename))
-    }
-
     private func copyTranscriptForSelectedVideoEntry() {
         guard let selectedEntryId,
               let selectedEntry = entries.first(where: { $0.id == selectedEntryId }),
@@ -824,32 +775,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             didCopyTranscript = false
         }
-    }
-    
-    private func parseCanonicalEntryFilename(_ filename: String) -> (uuid: UUID, timestamp: Date)? {
-        guard filename.hasPrefix("["),
-              filename.hasSuffix("].md"),
-              let divider = filename.range(of: "]-[") else {
-            return nil
-        }
-
-        let uuidStart = filename.index(after: filename.startIndex)
-        let uuidString = String(filename[uuidStart..<divider.lowerBound])
-        guard let uuid = UUID(uuidString: uuidString) else {
-            return nil
-        }
-
-        let timestampStart = divider.upperBound
-        let timestampEnd = filename.index(filename.endIndex, offsetBy: -4) // before ".md"
-        let timestampString = String(filename[timestampStart..<timestampEnd])
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        guard let timestamp = formatter.date(from: timestampString) else {
-            return nil
-        }
-
-        return (uuid: uuid, timestamp: timestamp)
     }
     
     private var activeSaveMode: DestinationSaveMode {
@@ -1087,64 +1012,6 @@ struct ContentView: View {
         return .captureSaved
     }
 
-    private func entryDisplayDate(from date: Date) -> String {
-        DestinationWriteTarget.displayDateString(from: date)
-    }
-
-    private func modificationDate(for fileURL: URL) -> Date {
-        if let attrs = try? fileManager.attributesOfItem(atPath: fileURL.path),
-           let mod = attrs[.modificationDate] as? Date {
-            return mod
-        }
-        return Date()
-    }
-
-    private func humanEntry(
-        from fileURL: URL
-    ) -> (entry: HumanEntry, date: Date, content: String)? {
-        let filename = fileURL.lastPathComponent
-        let parsed = parseCanonicalEntryFilename(filename)
-
-        let uuid: UUID
-        let fileDate: Date
-        if let parsed {
-            uuid = parsed.uuid
-            fileDate = parsed.timestamp
-        } else {
-            uuid = DestinationWriteTarget.stableUUID(fromPath: fileURL.standardizedFileURL.path)
-            fileDate = modificationDate(for: fileURL)
-        }
-
-        let videoFilename = filename.replacingOccurrences(of: ".md", with: ".mov")
-        let hasVideo = hasVideoAsset(for: videoFilename)
-
-        let content: String?
-        do {
-            content = try String(contentsOf: fileURL, encoding: .utf8)
-        } catch CocoaError.fileReadCorruptFile {
-            content = nil
-        } catch {
-            print("Error reading file: \(error)")
-            return nil
-        }
-
-        let title = content.map { HistoryRowFormatting.title(from: $0) } ?? filename
-        return (
-            entry: HumanEntry(
-                id: uuid,
-                date: entryDisplayDate(from: fileDate),
-                filename: filename,
-                previewText: hasVideo ? videoPreviewText(for: videoFilename) : title,
-                entryType: hasVideo ? .video : .text,
-                videoFilename: hasVideo ? videoFilename : nil,
-                timestamp: fileDate,
-                searchableBody: hasVideo ? (loadTranscriptText(for: videoFilename) ?? "") : (content ?? "")
-            ),
-            date: fileDate,
-            content: content ?? ""
-        )
-    }
-
     /// Builds a HumanEntry for a resolved write target, creating a shell if not yet listed.
     private func entryForResolvedTarget(_ target: DestinationWriteTarget.ResolvedTarget) -> HumanEntry {
         if let existing = entries.first(where: { $0.filename == target.filename }) {
@@ -1157,7 +1024,7 @@ struct ContentView: View {
             previewText: "",
             entryType: .text,
             videoFilename: nil,
-            timestamp: target.fileExists ? modificationDate(for: target.fileURL) : Date()
+            timestamp: target.fileExists ? HistoryEntryReader.modificationDate(for: target.fileURL) : Date()
         )
     }
 
@@ -1238,20 +1105,41 @@ struct ContentView: View {
     }
 
     private func openHistorySidebar() {
+        if showingSidebar {
+            closeHistorySidebar()
+        } else {
+            showHistory(searching: false)
+        }
+    }
+
+    private func searchNotes() {
+        showHistory(searching: true)
+    }
+
+    private func showHistory(searching: Bool) {
         if showingDestinationSettings && hasUnsavedDestinationSettingsChanges {
-            pendingDestinationSettingsCloseAction = .openHistory
+            pendingDestinationSettingsCloseAction = searching ? .searchNotes : .openHistory
             showingDiscardDestinationSettingsConfirmation = true
             return
         }
 
+        if !showingSidebar {
+            historySearchQuery = ""
+            syncSettingsDraftFromActiveDestination()
+        }
         withAnimation(.easeInOut(duration: 0.2)) {
-            if showingSidebar {
-                showingSidebar = false
-            } else {
-                syncSettingsDraftFromActiveDestination()
-                showingDestinationSettings = false
-                showingSidebar = true
-            }
+            showingDestinationSettings = false
+            showingSidebar = true
+        }
+        if searching {
+            isSearchingNotes = true
+            historySearchFocusRequest = UUID()
+        }
+    }
+
+    private func closeHistorySidebar() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showingSidebar = false
         }
     }
 
@@ -1328,10 +1216,9 @@ struct ContentView: View {
 
         switch action {
         case .openHistory:
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showingDestinationSettings = false
-                showingSidebar = true
-            }
+            showHistory(searching: false)
+        case .searchNotes:
+            showHistory(searching: true)
         case .closeRail:
             withAnimation(.easeInOut(duration: 0.2)) {
                 showingDestinationSettings = false
@@ -1404,20 +1291,19 @@ struct ContentView: View {
         }
     }
     
-    private func selectEntry(_ entry: HumanEntry) {
-        guard selectedEntryId != entry.id,
-              let targetEntry = entries.first(where: { $0.id == entry.id }),
+    private func selectEntry(_ entry: HumanEntry, onDiscard: @escaping () -> Void) -> Bool {
+        guard selectedEntryId != entry.id else { return true }
+        guard let targetEntry = entries.first(where: { $0.id == entry.id }),
               loadEntry(entry: targetEntry, beforeDisplaying: {
-                  prepareToLeaveEntry(onDiscard: {
-                      discardEditorChanges { selectEntry(entry) }
-                  })
-              }) else { return }
+                  prepareToLeaveEntry(onDiscard: onDiscard)
+              }) else { return false }
 
         if targetEntry.entryType == .text {
             DispatchQueue.main.async {
                 self.updatePreviewText(for: targetEntry)
             }
         }
+        return true
     }
 
     private func prepareToLeaveEntry(onDiscard: @escaping () -> Void) -> Bool {
@@ -1480,6 +1366,8 @@ struct ContentView: View {
         historyTrash = nil
         trashedEntry = nil
         historySearchQuery = ""
+        searchAllDestinations = false
+        historyKeyboardEntryID = nil
         // Defer journal reload so ForEach(entries) isn't mid-update when History is open.
         DispatchQueue.main.async {
             self.reloadJournalForActiveDestination()
@@ -1529,7 +1417,7 @@ struct ContentView: View {
     }
 
     // Add function to load existing entries
-    private func loadExistingEntries() {
+    private func loadExistingEntries(preservingSelection: Bool = false) {
         unreadableConfiguredNoteURL = nil
         guard let documentsDirectory = destinationStore.resolvedDocumentsURL() else {
             print("Active destination is unavailable; showing empty History")
@@ -1555,29 +1443,7 @@ struct ContentView: View {
             for draft in failedDrafts {
                 print("Could not recover capture draft: \(draft.lastPathComponent)")
             }
-            let fileURLs = try fileManager.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
-            let mdFiles = fileURLs.filter {
-                $0.pathExtension == "md"
-                    && !DestinationWriteTarget.isCaptureDraftFilename($0.lastPathComponent)
-            }
-
-            print("Found \(mdFiles.count) .md files")
-
-            let entriesWithDates = mdFiles.compactMap { fileURL -> (entry: HumanEntry, date: Date, content: String)? in
-                print("Processing: \(fileURL.lastPathComponent)")
-                return humanEntry(from: fileURL)
-            }
-            
-            // Sort and extract entries - store in temporary variable
-            let loadedEntries = entriesWithDates
-                .sorted {
-                    if $0.date == $1.date {
-                        return $0.entry.filename > $1.entry.filename
-                    }
-                    return $0.date > $1.date
-                }
-                .map { $0.entry }
-
+            let loadedEntries = try HistoryEntryReader(directory: documentsDirectory).entries()
             print("Successfully loaded and sorted \(loadedEntries.count) entries")
 
             // Now assign to the state variable
@@ -1586,6 +1452,8 @@ struct ContentView: View {
             if let liveEntry, !entries.contains(where: { $0.filename == liveEntry.filename }) {
                 entries.insert(liveEntry, at: 0)
             }
+
+            if preservingSelection { return }
 
             // Rolling / Existing: bind to resolved write target (skip new-note launch rules).
             if activeSaveMode == .rolling || activeSaveMode == .existing {
@@ -1600,6 +1468,10 @@ struct ContentView: View {
             
         } catch {
             print("Error loading directory contents: \(error)")
+            if preservingSelection {
+                entries = []
+                return
+            }
             print("Creating default entry after error")
             if activeSaveMode == .rolling || activeSaveMode == .existing {
                 _ = bindToResolvedWriteTarget(appendSeparator: false)
@@ -1974,123 +1846,21 @@ struct ContentView: View {
 
                     historySearchField
 
+                    if destinationStore.destinations.count > 1 {
+                        historyScopeButton
+                    }
+
                     Divider()
 
-                    let visibleEntries = filteredHistoryEntries
-                    if visibleEntries.isEmpty && !HistorySearch.terms(from: historySearchQuery).isEmpty {
-                        Text("No notes match")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .accessibilityIdentifier("historySearchEmpty")
-                    }
-
-                    // Entries List
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(visibleEntries) { entry in
-                                HStack(alignment: .top) {
-                                    // Show video thumbnail for video entries
-                                    if let videoFilename = resolvedVideoFilename(for: entry) {
-                                        if let thumbnail = loadThumbnailImage(for: videoFilename) {
-                                            Image(nsImage: thumbnail)
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                                .frame(width: 40, height: 40)
-                                                .cornerRadius(4)
-                                                .overlay(
-                                                    Image(systemName: "play.circle.fill")
-                                                        .foregroundColor(.white)
-                                                        .font(.system(size: 16))
-                                                )
-                                        } else {
-                                            // Fallback if thumbnail generation fails
-                                            ZStack {
-                                                Rectangle()
-                                                    .fill(Color.gray.opacity(0.3))
-                                                    .frame(width: 40, height: 40)
-                                                    .cornerRadius(4)
-                                                Image(systemName: "video.fill")
-                                                    .foregroundColor(.gray)
-                                                    .font(.system(size: 16))
-                                            }
-                                        }
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            Text(historyRowTitle(for: entry))
-                                                .font(.system(size: 13))
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-                                                .foregroundColor(entry.previewText.isEmpty ? .secondary : .primary)
-
-                                            Spacer()
-                                        }
-
-                                        Text(historyRowTimestamp(for: entry))
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(backgroundColor(for: entry))
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    historySearchFocused = false
-                                    selectEntry(entry)
-                                    if selectedEntryId == entry.id, entry.entryType == .text {
-                                        historySelectionFocusEntryId = entry.id
-                                        historySelectionFocusRequest = UUID()
-                                    }
-                                }
-                                .overlay(alignment: .trailing) {
-                                    if hoveredEntryId == entry.id {
-                                        Button(action: {
-                                            deleteEntry(entry: entry)
-                                        }) {
-                                            Image(systemName: "trash")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(hoveredTrashId == entry.id ? .red : .gray)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .onHover { hovering in
-                                            hoveredTrashId = hovering ? entry.id : nil
-                                            if hovering {
-                                                NSCursor.pointingHand.push()
-                                            } else {
-                                                NSCursor.pop()
-                                            }
-                                        }
-                                        .padding(.trailing, 8)
-                                    }
-                                }
-                                .onHover { hovering in
-                                    hoveredEntryId = hovering ? entry.id : nil
-                                }
-                                .help("Click to select this note")
-
-                                if entry.id != visibleEntries.last?.id {
-                                    Divider()
-                                }
-                            }
-                        }
-                    }
-                    .scrollIndicators(.never)
+                    historyResultsList
                 }
                 .frame(width: 200)
                 .background(RailRemovalObserver { editorFocusRequest = UUID() })
                 .background(Color(colorScheme == .light ? .white : NSColor.black))
                 .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .identity))
+                .task(id: searchAllDestinations) {
+                    await loadOtherDestinationResults()
+                }
             }
 
             if showingDestinationSettings {
@@ -2137,7 +1907,7 @@ struct ContentView: View {
             get: { noteOpenError != nil },
             set: { if !$0 { noteOpenError = nil } }
         )) {
-            Button("OK") { noteOpenError = nil }
+            Button("OK") { if showingSidebar { historySearchFocusRequest = UUID() } }
         } message: {
             Text(noteOpenError ?? "")
         }
@@ -2165,6 +1935,7 @@ struct ContentView: View {
                     openHistorySidebar()
                 }
             },
+            searchNotes: searchNotes,
             openDestinationSettings: openDestinationSettings
         ))
         .background(WindowTitleAccessor(
@@ -2183,7 +1954,13 @@ struct ContentView: View {
             }
         }
         .onChange(of: showingSidebar) { _, isShowing in
-            if isShowing { historySearchQuery = "" }
+            if !isShowing {
+                isSearchingNotes = false
+                historySearchFocusRequest = nil
+                historyKeyboardEntryID = nil
+                searchAllDestinations = false
+                otherDestinationResults = nil
+            }
         }
         .onAppear {
             showingSidebar = false  // Hide sidebar by default
@@ -2254,16 +2031,189 @@ struct ContentView: View {
         }
     }
     
-    private var filteredHistoryEntries: [HumanEntry] {
-        HistorySearch.filter(
-            entries,
-            query: historySearchQuery,
-            title: historyRowTitle(for:),
-            body: { entry in
-                // The open note's latest edits may not be saved yet.
-                entry.id == selectedEntryId && entry.entryType == .text ? text : entry.searchableBody
+    private var filteredHistoryResults: [HistoryResult] {
+        let current = entries.map {
+            HistoryResult(
+                destinationID: destinationStore.activeDestinationId,
+                destinationLabel: activeDestinationDisplayName,
+                entry: $0
+            )
+        }
+        let others = searchAllDestinations ? otherDestinationResults ?? [] : []
+        return HistorySearch.filter(current + others, query: historySearchQuery, title: {
+            historyRowTitle(for: $0.entry)
+        }, body: historyBody(for:))
+    }
+
+    private func historyBody(for result: HistoryResult) -> String {
+        if result.destinationID == destinationStore.activeDestinationId,
+           result.entry.id == selectedEntryId, result.entry.entryType == .text {
+            return text
+        }
+        return result.entry.searchableBody
+    }
+
+    @MainActor
+    private func loadOtherDestinationResults() async {
+        guard searchAllDestinations else { return }
+        let others = destinationStore.destinations.filter { $0.id != destinationStore.activeDestinationId }
+        let load = Task.detached(priority: .userInitiated) {
+            others.flatMap { destination -> [HistoryResult] in
+                guard !Task.isCancelled else { return [] }
+                return DestinationStore.withHistoryReadAccess(to: destination) { directory in
+                    (try? HistoryEntryReader(directory: directory).entries())?.map {
+                        HistoryResult(destinationID: destination.id, destinationLabel: destination.displayName, entry: $0)
+                    }
+                } ?? []
             }
-        )
+        }
+        let results = await withTaskCancellationHandler(operation: { await load.value }, onCancel: { load.cancel() })
+        guard !Task.isCancelled else { return }
+        otherDestinationResults = results
+    }
+
+    private var historyScopeButton: some View {
+        Button {
+            searchAllDestinations.toggle()
+            otherDestinationResults = nil
+            historyKeyboardEntryID = nil
+            historySearchFocusRequest = UUID()
+        } label: {
+            Label("All Destinations", systemImage: searchAllDestinations ? "checkmark.square" : "square")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("a", modifiers: [.command, .shift])
+        .help("Search all destinations (⇧⌘A)")
+        .accessibilityValue(searchAllDestinations ? "On" : "Off")
+        .accessibilityIdentifier("historySearchScope")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    private var historyResultsList: some View {
+        let results = filteredHistoryResults
+        let hasQuery = !HistorySearch.terms(from: historySearchQuery).isEmpty
+        let keyboardSelection = historyKeyboardEntryID != nil || isSearchingNotes || hasQuery
+        let highlightedID = keyboardSelection ? keyboardHistoryResult(in: results)?.id : nil
+        let isLoading = searchAllDestinations && otherDestinationResults == nil
+
+        return VStack(spacing: 0) {
+            if isLoading || (results.isEmpty && hasQuery) {
+                Text(isLoading ? "Searching destinations…" : "No notes match")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .accessibilityIdentifier(isLoading ? "historySearchLoading" : "historySearchEmpty")
+            }
+
+            ScrollViewReader { scroll in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(results) { result in
+                            let selected = keyboardSelection ? result.id == highlightedID : isOpenHistoryResult(result)
+                            historyResultRow(result, isSelected: selected, hasQuery: hasQuery)
+                                .id(result.id)
+                            if result.id != results.last?.id { Divider() }
+                        }
+                    }
+                }
+                .scrollIndicators(.never)
+                .onChange(of: highlightedID) { _, id in
+                    if let id { scroll.scrollTo(id) }
+                }
+            }
+        }
+    }
+
+    private func historyResultRow(_ result: HistoryResult, isSelected: Bool, hasQuery: Bool) -> some View {
+        let entry = result.entry
+        let isActive = result.destinationID == destinationStore.activeDestinationId
+        return HStack(alignment: .top) {
+            if let videoFilename = resolvedVideoFilename(for: entry) {
+                historyVideoThumbnail(isActive ? loadThumbnailImage(for: videoFilename) : nil)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(historyRowTitle(for: entry))
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .foregroundStyle(entry.previewText.isEmpty ? .secondary : .primary)
+                if hasQuery, let snippet = HistorySearch.snippet(
+                    query: historySearchQuery,
+                    body: historyBody(for: result),
+                    droppingTitleLine: entry.entryType == .text
+                ) {
+                    Text(snippet)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                if isSearchingNotes || searchAllDestinations || hasQuery {
+                    Text(result.destinationLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(historyRowTimestamp(for: entry))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 4).fill(backgroundColor(for: result, isSelected: isSelected)))
+        .contentShape(Rectangle())
+        .onTapGesture { openHistoryResult(result) }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .overlay(alignment: .trailing) {
+            if isActive && hoveredEntryId == entry.id {
+                Button(action: { deleteEntry(entry: entry) }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundColor(hoveredTrashId == entry.id ? .red : .gray)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredTrashId = hovering ? entry.id : nil
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .padding(.trailing, 8)
+            }
+        }
+        .onHover { hovering in
+            if isActive { hoveredEntryId = hovering ? entry.id : nil }
+        }
+    }
+
+    @ViewBuilder
+    private func historyVideoThumbnail(_ thumbnail: NSImage?) -> some View {
+        if let thumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 40, height: 40)
+                .cornerRadius(4)
+                .overlay(Image(systemName: "play.circle.fill").foregroundStyle(.white).font(.system(size: 16)))
+        } else {
+            ZStack {
+                Rectangle().fill(Color.gray.opacity(0.3))
+                Image(systemName: "video.fill").foregroundStyle(.gray).font(.system(size: 16))
+            }
+            .frame(width: 40, height: 40)
+        }
     }
 
     private var historySearchField: some View {
@@ -2271,20 +2221,25 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
-            TextField("Search", text: $historySearchQuery)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .focused($historySearchFocused)
-                .onExitCommand {
-                    if historySearchQuery.isEmpty {
-                        historySearchFocused = false
-                    } else {
-                        historySearchQuery = ""
-                    }
-                }
-                .accessibilityIdentifier("historySearchField")
+            HistoryQueryField(
+                query: Binding(get: { historySearchQuery }, set: {
+                    historySearchQuery = $0
+                    historyKeyboardEntryID = nil
+                }),
+                focusRequest: historySearchFocusRequest,
+                moveSelection: moveHistorySelection,
+                submit: {
+                    if let result = keyboardHistoryResult(in: filteredHistoryResults) { openHistoryResult(result) }
+                },
+                cancel: closeHistorySidebar
+            )
+            .frame(height: 17)
             if !historySearchQuery.isEmpty {
-                Button(action: { historySearchQuery = "" }) {
+                Button(action: {
+                    historySearchQuery = ""
+                    historyKeyboardEntryID = nil
+                    historySearchFocusRequest = UUID()
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -2298,6 +2253,81 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
+    private func keyboardHistoryResult(in results: [HistoryResult]) -> HistoryResult? {
+        if let highlighted = results.first(where: { $0.id == historyKeyboardEntryID }) { return highlighted }
+        if !isSearchingNotes, let open = results.first(where: isOpenHistoryResult) { return open }
+        return results.first
+    }
+
+    private func isOpenHistoryResult(_ result: HistoryResult) -> Bool {
+        result.destinationID == destinationStore.activeDestinationId && result.entry.id == selectedEntryId
+    }
+
+    private func moveHistorySelection(by offset: Int) {
+        let results = filteredHistoryResults
+        guard !results.isEmpty else { return }
+        let currentID = keyboardHistoryResult(in: results)?.id
+        let currentIndex = results.firstIndex { $0.id == currentID } ?? 0
+        let nextIndex = max(0, min(results.count - 1, currentIndex + offset))
+        historyKeyboardEntryID = results[nextIndex].id
+    }
+
+    private func openHistoryResult(_ result: HistoryResult) {
+        let entry = result.entry
+        let otherDestination = result.destinationID != destinationStore.activeDestinationId
+        let onDiscard = {
+            discardEditorChanges { openHistoryResult(result) }
+        }
+        if otherDestination {
+            guard openHistoryResultInOtherDestination(result, onDiscard: onDiscard) else { return }
+        } else {
+            guard selectEntry(entry, onDiscard: onDiscard) else { return }
+        }
+        if currentVideoURL == nil {
+            historySelectionFocusEntryId = selectedEntryId
+            historySelectionFocusRequest = UUID()
+        }
+        historyKeyboardEntryID = nil
+        if isSearchingNotes || otherDestination { closeHistorySidebar() }
+    }
+
+    private func openHistoryResultInOtherDestination(_ result: HistoryResult, onDiscard: @escaping () -> Void) -> Bool {
+        func readEntry(in directory: URL) -> HumanEntry? {
+            HistoryEntryReader(directory: directory).entry(
+                at: directory.appendingPathComponent(result.entry.filename), includeUnreadable: false
+            )
+        }
+
+        let previousDestination = destinationStore.activeDestinationId
+        guard let destination = destinationStore.destinations.first(where: { $0.id == result.destinationID }),
+              DestinationStore.withHistoryReadAccess(to: destination, read: readEntry(in:)) != nil else {
+            noteOpenError = "This note is no longer available."
+            return false
+        }
+        guard prepareToLeaveEntry(onDiscard: onDiscard) else { return false }
+
+        guard case .accessible = destinationStore.activateDestination(id: destination.id) else {
+            destinationStore.activateDestination(id: previousDestination)
+            noteOpenError = "This destination is no longer available."
+            return false
+        }
+        // Activation can migrate the legacy default folder; bind using the final path.
+        guard let directory = getDocumentsDirectory(), let entry = readEntry(in: directory) else {
+            destinationStore.activateDestination(id: previousDestination)
+            noteOpenError = "This note is no longer available."
+            return false
+        }
+        guard loadEntry(entry: entry) else {
+            destinationStore.activateDestination(id: previousDestination)
+            return false
+        }
+        historyTrash = nil
+        trashedEntry = nil
+        thumbnailMemoryCache.removeAllObjects()
+        loadExistingEntries(preservingSelection: true)
+        return true
+    }
+
     private func historyRowTitle(for entry: HumanEntry) -> String {
         entry.previewText.isEmpty ? "Untitled" : entry.previewText
     }
@@ -2307,10 +2337,10 @@ struct ContentView: View {
         return HistoryRowFormatting.timestamp(from: timestamp)
     }
 
-    private func backgroundColor(for entry: HumanEntry) -> Color {
-        if entry.id == selectedEntryId {
+    private func backgroundColor(for entry: HistoryResult, isSelected: Bool) -> Color {
+        if isSelected {
             return colorScheme == .dark ? Color.white.opacity(0.2) : Color.gray.opacity(0.1)
-        } else if entry.id == hoveredEntryId {
+        } else if entry.destinationID == destinationStore.activeDestinationId && entry.entry.id == hoveredEntryId {
             return Color.gray.opacity(0.05)  // Even more subtle hover state
         } else {
             return Color.clear
@@ -2321,7 +2351,7 @@ struct ContentView: View {
         if entry.entryType == .video {
             if let index = entries.firstIndex(where: { $0.id == entry.id }),
                let videoFilename = resolvedVideoFilename(for: entry) {
-                entries[index].previewText = videoPreviewText(for: videoFilename)
+                entries[index].previewText = HistoryEntryReader.videoTitle(from: loadTranscriptText(for: videoFilename))
                 entries[index].searchableBody = loadTranscriptText(for: videoFilename) ?? ""
             }
             return
@@ -2337,8 +2367,8 @@ struct ContentView: View {
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries[index].previewText = HistoryRowFormatting.title(from: content)
                 entries[index].searchableBody = content
-                if parseCanonicalEntryFilename(entry.filename) == nil {
-                    entries[index].timestamp = modificationDate(for: fileURL)
+                if HistoryEntryReader.canonicalTimestamp(for: entry.filename) == nil {
+                    entries[index].timestamp = HistoryEntryReader.modificationDate(for: fileURL)
                 }
             }
         } catch {
@@ -2858,7 +2888,7 @@ struct ContentView: View {
             if let draft = trashedEntry,
                DestinationWriteTarget.isCaptureDraftFilename(draft.filename),
                let url = restoredURLs.first(where: { $0.pathExtension == "md" }) {
-                restoredEntry = humanEntry(from: url)?.entry
+                restoredEntry = HistoryEntryReader(directory: url.deletingLastPathComponent()).entry(at: url)
             }
             if let entry = restoredEntry {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
