@@ -19,6 +19,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
     private let hint = NSTextField(labelWithString: "Esc to finish")
     private lazy var done = NSButton(title: "Done", target: self, action: #selector(finish))
     private lazy var keepDraft = NSButton(title: "Keep Draft", target: self, action: #selector(hideKeepingDraft))
+    private lazy var discardDraft = NSButton(title: "Discard…", target: self, action: #selector(confirmDiscard))
     private var draft: CaptureDraft?
 
     var canWrite: (URL) -> Bool = { _ in true }
@@ -49,7 +50,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
         editor.textContainer?.widthTracksTextView = true
         editor.autoresizingMask = [.width]
         editor.isVerticallyResizable = true
-        editor.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.delegate = self
         editor.setAccessibilityLabel("Capture text")
         editor.setAccessibilityIdentifier("quickCaptureEditor")
@@ -68,7 +69,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [hint, spacer, keepDraft, done])
+        let footer = NSStackView(views: [hint, spacer, discardDraft, keepDraft, done])
         footer.alignment = .centerY
 
         let stack = NSStackView(views: [destinationLabel, scroll, message, footer])
@@ -113,6 +114,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
             }
             done.title = "Done"
             offerKeepDraft(false)
+            discardDraft.isHidden = true
             panel.appearance = NSAppearance(named: UserDefaults.standard.string(forKey: "colorScheme") == "dark"
                                                ? .darkAqua : .aqua)
             if let frame = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })?.visibleFrame
@@ -176,6 +178,7 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
                 offerKeepDraft(false)
             }
             done.title = "Retry"
+            discardDraft.isHidden = draft.isBlank
             panel.makeFirstResponder(editor)
         }
     }
@@ -195,6 +198,24 @@ final class CapturePanelController: NSObject, NSTextViewDelegate {
     private func offerKeepDraft(_ isSafe: Bool) {
         keepDraft.isHidden = !isSafe
         hint.stringValue = isSafe ? "Esc to keep draft" : "Esc to finish"
+    }
+
+    @objc private func confirmDiscard() {
+        let alert = NSAlert()
+        alert.messageText = "Discard this capture draft?"
+        alert.informativeText = "The text in the capture panel will be cleared."
+        alert.addButton(withTitle: "Keep Draft").keyEquivalent = "\r"
+        alert.addButton(withTitle: "Discard Draft").hasDestructiveAction = true
+        alert.beginSheetModal(for: panel) { [weak self] response in
+            guard let self, response == .alertSecondButtonReturn else { return }
+            do {
+                try self.store.discard()
+                self.draft = nil
+                self.panel.orderOut(nil)
+            } catch {
+                self.setStatus("Couldn’t remove the local draft. It hasn’t been cleared.")
+            }
+        }
     }
 
     private func setStatus(_ text: String?) {
