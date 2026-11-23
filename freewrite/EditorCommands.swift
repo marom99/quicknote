@@ -3,6 +3,7 @@ import SwiftUI
 struct EditorCommandActions {
     var newEntry: () -> Void
     var openHistory: () -> Void
+    var searchNotes: () -> Void
     var openDestinationSettings: () -> Void
 }
 
@@ -20,12 +21,14 @@ extension FocusedValues {
 enum EditorCommand {
     case newEntry
     case openHistory
+    case searchNotes
     case openDestinationSettings
 
     var shortcut: KeyboardShortcut {
         switch self {
         case .newEntry: KeyboardShortcut("n", modifiers: .command)
         case .openHistory: KeyboardShortcut("h", modifiers: [.command, .shift])
+        case .searchNotes: KeyboardShortcut("p", modifiers: .command)
         case .openDestinationSettings: KeyboardShortcut(",", modifiers: .command)
         }
     }
@@ -35,6 +38,7 @@ enum EditorCommand {
         switch self {
         case .newEntry: actions.newEntry()
         case .openHistory: actions.openHistory()
+        case .searchNotes: actions.searchNotes()
         case .openDestinationSettings: actions.openDestinationSettings()
         }
     }
@@ -50,6 +54,7 @@ struct EditorCommands: Commands {
 
         CommandGroup(after: .sidebar) {
             commandButton("History", .openHistory)
+            commandButton("Search Notes", .searchNotes)
         }
 
         CommandGroup(replacing: .appSettings) {
