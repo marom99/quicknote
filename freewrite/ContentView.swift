@@ -2365,9 +2365,6 @@ struct ContentView: View {
             do {
                 loadedText = try noteSaveState.load(from: fileURL)
                 print("Successfully loaded entry: \(entry.filename)")
-            } catch CocoaError.fileReadNoSuchFile {
-                // Soft-fail missing file (e.g. Existing note removed from disk).
-                print("Entry file missing: \(entry.filename)")
             } catch {
                 print("Error loading entry: \(error)")
                 noteOpenError = "\(entry.filename)\n\(error.localizedDescription)"

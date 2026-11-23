@@ -134,6 +134,26 @@ struct NoteSaveStateTests {
         #expect(try Data(contentsOf: url) == original)
     }
 
+    @Test func deletedHistoryFileCannotBeLoadedAsBlankBeforeTitleFinalizes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("Shared title.md")
+        let draft = directory.appendingPathComponent(DestinationWriteTarget.captureDraftFilename(captureId: UUID()))
+        let content = "Shared title\n\nLive draft"
+        var state = NoteSaveState()
+        _ = try state.save("Old note", to: url)
+        try FileManager.default.removeItem(at: url)
+        _ = try state.save(content, to: draft)
+
+        #expect(throws: CocoaError.self) { try state.load(from: url) }
+        let finalizedName = DestinationWriteTarget.uniqueMarkdownFilename(
+            preferredBasename: "Shared title", documentsURL: directory
+        )
+        #expect(finalizedName == url.lastPathComponent)
+        #expect(try state.load(from: draft) == content)
+    }
+
     @Test func failedReloadPreservesPreviousBaseline() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
