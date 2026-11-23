@@ -509,6 +509,7 @@ struct ContentView: View {
     @State private var editorFocusRequest = UUID()
     @State private var quickCaptureFocusRequest: UUID?
     @State private var historySelectionFocusRequest: UUID?
+    @State private var historySelectionFocusEntryId: UUID?
     @State private var editorCaretEndRequest: UUID?
     @State private var selectedEntryId: UUID? = nil
     @State private var isLoadingEntry = false
@@ -1963,9 +1964,8 @@ struct ContentView: View {
                                     historySearchFocused = false
                                     selectEntry(entry)
                                     if entry.entryType == .text {
+                                        historySelectionFocusEntryId = entry.id
                                         historySelectionFocusRequest = UUID()
-                                        // One-shot: an editor created later must not replay it.
-                                        DispatchQueue.main.async { historySelectionFocusRequest = nil }
                                     }
                                 }
                                 .overlay(alignment: .trailing) {
@@ -2065,6 +2065,13 @@ struct ContentView: View {
         ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
+        .onChange(of: selectedEntryId) { _, newId in
+            // Drop a History focus request once its note is no longer open, so a later editor can't replay it.
+            if newId != historySelectionFocusEntryId {
+                historySelectionFocusRequest = nil
+                historySelectionFocusEntryId = nil
+            }
+        }
         .onChange(of: showingSidebar) { _, isShowing in
             if isShowing { historySearchQuery = "" }
         }
