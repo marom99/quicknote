@@ -102,6 +102,21 @@ struct CaptureDraftTests {
         #expect(try String(contentsOf: file, encoding: .utf8) == before + draft.separator + draft.text)
     }
 
+    @Test func appendPreservesTheExistingFileIdentity() throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var draft = f.draft(.existing)
+        draft.text = "Captured"
+        let file = try f.target(for: draft)
+        try "Original".write(to: file, atomically: true, encoding: .utf8)
+        let alias = f.destination.appendingPathComponent("Hard link.md")
+        try FileManager.default.linkItem(at: file, to: alias)
+
+        #expect(try f.store.save(&draft, in: f.destination) == file)
+        #expect(CaptureDraftStore.sameFile(file, alias))
+        #expect(try String(contentsOf: alias, encoding: .utf8) == "Original" + draft.separator + draft.text)
+    }
+
     @Test func rollingCreatesMissingFileOnlyOnNonemptySave() throws {
         let f = try Fixture()
         defer { f.cleanUp() }

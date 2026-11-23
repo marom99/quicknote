@@ -138,31 +138,29 @@ struct CaptureDraftStore {
         if mode == .newNote && original != nil { throw SaveError.changedTarget }
         guard canWrite(target) else { throw SaveError.unsavedEditor }
 
-        let output: Data
-        if mode == .newNote {
-            output = Data(draft.text.utf8)
-        } else {
-            if let original, String(data: original, encoding: .utf8) == nil { throw SaveError.invalidText }
-            output = (original ?? Data()) + Data((draft.separator + draft.text).utf8)
-        }
+        if let original, String(data: original, encoding: .utf8) == nil { throw SaveError.invalidText }
+        let addition = Data(((mode == .newNote ? "" : draft.separator) + draft.text).utf8)
+        let outputDigest = digest((original ?? Data()) + addition)
 
         if draft.pendingWrite == nil {
             var prepared = draft
-            prepared.pendingWrite = .init(filename: filename, previousDigest: originalDigest, savedDigest: digest(output))
+            prepared.pendingWrite = .init(filename: filename, previousDigest: originalDigest, savedDigest: outputDigest)
             try preserve(prepared)
             draft = prepared
         }
 
         do {
-            if try read(target).map(digest) != originalDigest { throw SaveError.changedTarget }
-            if original == nil {
+            if let originalDigest {
+                try append(addition, to: target, after: originalDigest)
+            } else {
                 // Move a complete file into place without replacing a newly created note.
                 let staged = directory.appendingPathComponent(".quicknote-write-\(UUID()).tmp")
                 defer { try? fileManager.removeItem(at: staged) }
-                try output.write(to: staged, options: .atomic)
+                try addition.write(to: staged, options: .atomic)
                 try fileManager.moveItem(at: staged, to: target)
-            } else {
-                try output.write(to: target, options: .atomic)
+            }
+            if try read(target).map(digest) != outputDigest {
+                throw SaveError.changedTarget
             }
         } catch {
             if (try? read(target).map(digest) == originalDigest) == true {
@@ -176,9 +174,21 @@ struct CaptureDraftStore {
         return target
     }
 
+    private func append(_ data: Data, to target: URL, after previousDigest: Data) throws {
+        // Never publish a replacement built from a stale read of another app's note.
+        let fd = open(target.path, O_WRONLY | O_APPEND | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let file = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? file.close() }
+        if try read(target).map(digest) != previousDigest { throw SaveError.changedTarget }
+        try file.write(contentsOf: data)
+        try file.synchronize()
+    }
+
     private func read(_ target: URL) throws -> Data? {
         do {
-            if try target.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true {
+            let values = try target.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            if values.isSymbolicLink == true || values.isRegularFile != true {
                 throw SaveError.changedTarget
             }
             return try Data(contentsOf: target)
