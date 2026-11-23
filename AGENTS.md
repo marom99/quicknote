@@ -12,7 +12,7 @@
 
 ### What is Quick Note?
 
-Quick Note is a **distraction-free writing environment** for macOS designed around the concept of stream-of-consciousness writing and video journaling. The core philosophy is to remove barriers between thought and writing by creating a minimalist, opinionated interface that prioritizes the act of writing over formatting, organization, or editing.
+Quick Note is a distraction-free writing environment for macOS. It also plays existing video journals.
 
 ### User Experience Philosophy
 
@@ -32,11 +32,9 @@ Quick Note is a **distraction-free writing environment** for macOS designed arou
 - Timer creates urgency and prevents over-editing
 - Backspace disable forces forward momentum in thinking
 
-**Secondary Use Case - Video Journaling:**
-- Quick video capture for visual thoughts/ideas
-- Video entries stored alongside text entries in chronological history
-- One-click recording with built-in timer
-- Local storage ensures privacy for personal video journals
+**Secondary Use Case - Revisit Video Journals:**
+- Play existing video notes from the same History as text notes.
+- Copy a saved transcript when one is available.
 
 **Tertiary Use Case - AI-Assisted Reflection:**
 - "Chat" button sends writing to ChatGPT or Claude
@@ -50,7 +48,7 @@ Quick Note is a **distraction-free writing environment** for macOS designed arou
 
 ## Overview
 
-Quick Note is a native macOS writing application built with SwiftUI that allows users to write text entries and record video entries. All data is stored locally; the default journal lives in `~/Documents/Quick Note/`, and writers can add additional named destinations pointing at other folders.
+Quick Note is a native macOS writing application built with SwiftUI. It writes text entries and plays existing video entries. All data is stored locally; the default journal lives in `~/Documents/Quick Note/`, and writers can add additional named destinations pointing at other folders.
 
 ## Architecture
 
@@ -59,7 +57,7 @@ Quick Note is a native macOS writing application built with SwiftUI that allows 
 - **Minimum macOS Version**: 14.0
 - **Language**: Swift 5.0
 - **Build System**: Xcode
-- **Media**: AVFoundation for camera/video recording
+- **Media**: AVKit for playback and AVFoundation for thumbnails
 
 ### Project Structure
 
@@ -72,7 +70,6 @@ freewrite/
 │   ├── QuickCapture.swift        # Carbon hotkey + menu-bar capture routing
 │   ├── DestinationStore.swift    # Named destinations + save modes
 │   ├── DestinationWriteTarget.swift # Rolling/existing resolve helpers
-│   ├── VideoRecordingView.swift  # Video recording interface
 │   ├── VideoPlayerView.swift     # Video playback interface
 │   └── freewrite.entitlements    # App permissions
 ├── CLAUDE.md                     # This file
@@ -160,7 +157,6 @@ The main view containing all UI and business logic.
 @State private var entries: [HumanEntry] = []           // All loaded entries
 @State private var text: String = ""                    // Current text editor content
 @State private var selectedEntryId: UUID? = nil         // Currently selected entry
-@State private var showingVideoRecording = false        // Video recording overlay visibility
 @State private var currentVideoURL: URL? = nil          // Video playback URL
 @State private var showingSidebar = false               // History sidebar visibility
 @State private var colorScheme: ColorScheme = .light    // Light/dark theme
@@ -174,41 +170,13 @@ The main view containing all UI and business logic.
 #### Core Functions
 
 **Entry Management**:
-- `loadExistingEntries()` - Loads all .md and .mov files from documents directory
+- `loadExistingEntries()` - Loads Markdown entries and resolves associated video files
 - `createNewEntry()` - Creates new text entry
 - `saveEntry(entry:)` - Saves text to .md file
 - `loadEntry(entry:)` - Loads text or video for display
 - `deleteEntry(entry:)` - Moves the note and associated video assets to macOS Trash via `HistoryTrash`, retaining original/resulting URLs. An eight-second “Moved to Trash” banner restores files and the History row with Undo; switching destinations clears the affordance. Undo reselects/reloads a note that was selected before deletion, including an Existing target. Deleting the last selected entry leaves a blank, unbound canvas in every mode without creating a replacement file. If typing recreates the target before Undo, its user content is never overwritten. Restored Title drafts are finalized directly to unique visible title filenames rather than left hidden.
-- `saveVideoEntry(from:)` - Saves recorded video and creates metadata
 
 **Important**: When modifying the `entries` array from async contexts, wrap in `DispatchQueue.main.async` to prevent collection mutation crashes.
-
-### VideoRecordingView.swift
-
-Handles camera access and video recording.
-
-#### CameraManager Class
-
-```swift
-class CameraManager: NSObject, ObservableObject {
-    @Published var isRecording = false
-    @Published var recordingTime: Int = 0
-    @Published var permissionGranted = false
-
-    private var captureSession: AVCaptureSession?
-    private var videoOutput: AVCaptureMovieFileOutput?
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-}
-```
-
-**Key Methods**:
-- `setupCamera()` - Configures AVCaptureSession with video/audio inputs
-- `startRecording(to:)` - Begins recording to temporary file
-- `stopRecording()` - Stops recording and triggers completion handler
-- `cleanup()` - Releases camera resources
-
-**Critical**: Always use `beginConfiguration()` and `commitConfiguration()` when modifying AVCaptureSession to prevent crashes.
-**UI Pattern**: The recorder is rendered as an immersive edge-to-edge overlay with a transparent bottom nav and a floating circular record control.
 
 ### VideoPlayerView.swift
 
@@ -234,7 +202,7 @@ struct VideoPlayerView: View {
 ├─────────────────────────────────────────────────────────┤
 │  Bottom Nav Bar:                                        │
 │  [16px] • [Lato] • [Arial] • [System] • [Serif] • ...  │
-│  ... [15:00] • [🎥] • [Chat] • [Backspace] • [...]     │
+│     [New Note] • [Theme] • [History]                    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -265,7 +233,6 @@ struct VideoPlayerView: View {
 
 ### Right Side (Utilities)
 - **Timer**: Shows time remaining, click to start/stop, double-click to reset
-- **Video Camera (🎥)**: Opens immersive video recording overlay
 - **Chat**: Opens AI chat menu (ChatGPT/Claude integration)
 - **Backspace Toggle**: Enable/disable backspace key
 - **Fullscreen**: Toggle fullscreen mode
@@ -280,34 +247,6 @@ struct VideoPlayerView: View {
 - **Cmd+,**: Opens the active destination settings rail via `openDestinationSettings()`; does not reset unsaved edits if already open.
 - `EditorCommands` is attached to the app scene with `.commands`; it replaces `.newItem` and `.appSettings` to avoid duplicate shortcuts. `ContentView` publishes `EditorCommandActions` with `.focusedSceneValue`, so commands target only the focused window and are disabled without one.
 
-## Video Recording Flow
-
-1. User clicks video camera icon (🎥)
-2. Camera icon switches to a small spinner while preflight runs
-3. App requests/validates **all required permissions**: camera + microphone + speech recognition
-4. If any permission is missing, recorder is **not** presented; a compact popover above the camera icon explains what is missing and links to System Settings
-5. Once camera session is fully ready (plus a short presentation delay), `VideoRecordingView` is rendered via `.overlay` on top of `ContentView` with animations disabled for open/close (plain swap, no transition)
-6. Camera preview fills the entire window content area edge-to-edge
-7. Transparent bottom nav appears over video with: `Close`, recording status, recording control text (`Start Recording` / `Stop Recording`), and timer
-8. User clicks "Start Recording"
-   - Recording begins to temp file
-   - Timer starts counting up
-   - Button changes to "Stop Recording"
-9. User clicks "Stop Recording"
-   - Recording stops
-   - Speech transcript is finalized (spacing + sentence endings/capitalization)
-   - `onRecordingComplete` closure called with temp URL + finalized transcript
-10. `saveVideoEntry(from:transcript:)` called
-   - Creates per-entry video directory in `~/Documents/Quick Note/Videos/[UUID]-[date]/`
-   - Video copied from temp to `~/Documents/Quick Note/Videos/[UUID]-[date]/[UUID]-[date].mov`
-   - Thumbnail generated once and saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/thumbnail.jpg`
-   - Transcript saved to `~/Documents/Quick Note/Videos/[UUID]-[date]/transcript.md` when available
-   - Metadata file created: `[UUID]-[date].md` with "Video Entry"
-   - Entry added to `entries` array (on main thread), selected immediately, and loaded into the main view
-   - Playback starts automatically with audio enabled
-   - Overlay dismissed
-11. If user clicks `Close` while recording, the temp recording is discarded and no entry is created; recorder dismisses first, then camera cleanup runs on disappear
-
 ## Video Playback Flow
 
 1. User clicks video entry in sidebar
@@ -317,13 +256,13 @@ struct VideoPlayerView: View {
    - Clears `text`
 4. Main view checks `if let videoURL = currentVideoURL`
 5. Shows `VideoPlayerView(videoURL:)` instead of TextEditor
-6. Video auto-plays muted with standard AVKit controls
+6. Video auto-plays with the stored mute and volume settings; a saved transcript can be copied from the bottom nav
 
 ## Quick capture (global hotkey + menu bar)
 
 - ⌃⌥⌘N uses Carbon hotkey registration (no Accessibility permission); the menu-bar pencil also offers Quick Capture, Show Window, and Quit.
 - Main-actor `QuickCaptureCenter` activates and restores the key registered editor (or another editor). With all windows closed it opens WindowGroup `main` through the menu label's SwiftUI openWindow action; the new editor consumes one pending capture request after appearing.
-- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor. The current ContentView has no recording overlay presentation path; if recording is restored, skip capture while that overlay is visible.
+- Quick capture reuses `createNewEntry()` and existing destination/autosave behavior, closes History and clean settings, preserves dirty settings, and focuses the native text editor.
 - `QuickCapture.swift` and its tests belong to file-system-synchronized Xcode groups; no manual project file entries are needed.
 - Before capture, native editor input is suspended and first responder resigned; capture runs before raising the window. Input resumes only after the SwiftUI editor update applies the new capture text, preventing immediate typing from copying stale native text into the new note.
 
@@ -369,21 +308,9 @@ Required entitlements in `freewrite.entitlements`:
 <true/>
 <key>com.apple.security.files.bookmarks.app-scope</key>
 <true/>
-<key>com.apple.security.device.camera</key>
-<true/>
-<key>com.apple.security.device.audio-input</key>
-<true/>
-<key>com.apple.security.personal-information.speech-recognition</key>
-<true/>
 ```
 
-Privacy usage descriptions (in Xcode project build settings):
-
-```
-INFOPLIST_KEY_NSCameraUsageDescription = "Quick Note needs camera access to record video entries."
-INFOPLIST_KEY_NSMicrophoneUsageDescription = "Quick Note needs microphone access to record audio with your video entries."
-INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Quick Note uses speech recognition to transcribe your video entries."
-```
+Quick Note does not request access to the camera, microphone, or speech recognition. Playing existing videos and copying stored transcripts only reads files.
 
 ## Technical Nuances & Implementation Details
 
@@ -393,14 +320,13 @@ The app uses a **hybrid threading approach**:
 
 1. **Main Thread**: All UI updates and `@State` mutations
 2. **Global Queue**: File I/O operations (reading/writing markdown files)
-3. **AVFoundation Queue**: Camera setup and video capture
 
 **Critical Threading Issue**:
 SwiftUI's `ForEach` creates an enumerator over the `entries` array. If you modify this array (insert, remove, replace) while the enumerator is active, you get `NSGenericException: Collection was mutated while being enumerated`.
 
 **Solution Pattern**:
 ```swift
-// When in async context (camera completion handler, DispatchQueue callback):
+// When in a DispatchQueue callback:
 DispatchQueue.main.async {
     self.entries.insert(newEntry, at: 0)  // Safe
 }
@@ -577,102 +503,6 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
 
 **Why this matters**: Forces users to write without editing, embracing imperfection and maintaining flow state.
 
-### Video Recording Architecture
-
-**AVFoundation Setup Sequence**:
-
-```swift
-// 1. Create session
-captureSession = AVCaptureSession()
-
-// 2. Get devices
-let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-let audioDevice = AVCaptureDevice.default(for: .audio)
-
-// 3. Create inputs
-let videoInput = try AVCaptureDeviceInput(device: videoDevice)
-let audioInput = try AVCaptureDeviceInput(device: audioDevice)
-
-// 4. CRITICAL: Begin configuration
-captureSession?.beginConfiguration()
-
-// 5. Configure session
-captureSession?.sessionPreset = .high
-captureSession?.addInput(videoInput)
-captureSession?.addInput(audioInput)
-
-// 6. Add output
-videoOutput = AVCaptureMovieFileOutput()
-captureSession?.addOutput(videoOutput!)
-audioDataOutput = AVCaptureAudioDataOutput()
-audioDataOutput?.setSampleBufferDelegate(self, queue: speechQueue)
-captureSession?.addOutput(audioDataOutput!)
-
-// 7. CRITICAL: Commit configuration
-captureSession?.commitConfiguration()
-
-// 8. Start running on background thread
-DispatchQueue.global(qos: .userInitiated).async {
-    self.captureSession?.startRunning()
-}
-```
-
-**Startup/Teardown Safety Rule**:
-- Trigger camera setup from a single lifecycle path (avoid duplicate `checkPermissions()` calls for the same view presentation).
-- Call `startRunning()` only once per configured session startup path.
-- Guard setup with a dedicated in-flight flag (e.g. `isSettingUpSession`) so repeated permission callbacks/onAppear events cannot run parallel setup work.
-- Attach/bind `AVCaptureVideoPreviewLayer` only after `startRunning()` completes to avoid concurrent session mutations during startup.
-- During teardown, prefer `stopRunning()` + releasing references over removing inputs/outputs while the session may still be transitioning states.
-
-**Why `beginConfiguration()` / `commitConfiguration()`?**
-
-AVCaptureSession maintains internal arrays of inputs/outputs. When you call `addInput()` or `addOutput()`, it mutates these arrays. If the session is actively running or if another thread is enumerating these arrays (for validation, etc.), you get collection mutation crash.
-
-`beginConfiguration()` tells the session: "I'm about to make multiple changes, don't validate or enumerate until I'm done."
-
-`commitConfiguration()` tells the session: "I'm done, now validate everything and update internal state."
-
-**Recording Flow**:
-
-```swift
-// Start recording
-videoOutput.startRecording(to: tempURL, recordingDelegate: self)
-
-// Delegate callback when done
-func fileOutput(_ output: AVCaptureFileOutput,
-                didFinishRecordingTo outputFileURL: URL,
-                from connections: [AVCaptureConnection],
-                error: Error?) {
-    DispatchQueue.main.async {
-        self.onRecordingComplete?(outputFileURL)
-    }
-}
-```
-
-**Temporary File Strategy**:
-- Record to temp directory: `FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")`
-- On completion: Copy to permanent location
-- Why? If recording fails, temp file is auto-cleaned by OS
-
-### Speech Transcription (Speech Framework)
-
-Speech transcription in `VideoRecordingView` is implemented with Apple's `Speech` framework and runs in the background during recording:
-
-1. Request speech auth with `SFSpeechRecognizer.requestAuthorization`.
-2. Keep camera/video recording on `AVCaptureMovieFileOutput`.
-3. Add `AVCaptureAudioDataOutput` to the same capture session and stream sample buffers to speech recognition.
-4. Feed sample buffers into `SFSpeechAudioBufferRecognitionRequest` (`appendAudioSampleBuffer`).
-5. Build partial + committed transcript text while recording (no live caption overlay rendered).
-6. Finalize transcript on stop and persist it as `transcript.md` in that entry's video directory.
-
-Key details:
-- Camera, microphone, and speech recognition permissions are all required before opening the recorder.
-- If any permission is denied, the app keeps the user in the writing view and shows a compact camera-icon popover with the missing permission(s).
-- Transcription is started on recording start and stopped on recording stop.
-- Final transcript formatting is applied at stop to improve readability before saving/copying.
-- Video playback nav exposes `Copy Transcript` for saved video entries with a transcript file.
-- App sandbox requires `com.apple.security.personal-information.speech-recognition` entitlement plus `NSSpeechRecognitionUsageDescription`.
-
 ### Video Thumbnail Generation Nuances
 
 ```swift
@@ -690,7 +520,7 @@ func generateVideoThumbnail(from url: URL) -> NSImage? {
 
 Videos recorded on front-facing camera are often rotated 90°. The video file contains a transform matrix that says "rotate this video when playing." Without `appliesPreferredTrackTransform`, the thumbnail would be sideways.
 
-**Performance Note**: Thumbnails are generated once when a recording is saved and persisted as `thumbnail.jpg` in each entry's video directory. Sidebar rows load precomputed image files instead of extracting frames from `.mov` during render. For older entries without thumbnails, the app lazily generates once and saves for subsequent loads.
+**Performance Note**: Sidebar rows load `thumbnail.jpg` from the per-entry directory. If a saved entry has no thumbnail, the app generates one from the existing movie and tries to persist it for future loads.
 
 ### Text Editor Header Behavior
 
@@ -854,30 +684,6 @@ DispatchQueue.main.async {
 }
 ```
 
-### AVCaptureSession Crashes
-
-**Problem**: Session internals can crash with `Collection ... was mutated while being enumerated` when session startup/teardown overlaps (for example duplicate setup/start calls or mutating inputs/outputs during active transitions).
-
-**Solution**:
-```swift
-captureSession?.beginConfiguration()
-// Add/remove inputs and outputs here
-captureSession?.sessionPreset = .high
-captureSession?.addInput(videoInput)
-captureSession?.commitConfiguration()
-```
-
-Also:
-```swift
-// Avoid duplicate startup paths for the same presentation
-// and avoid repeated startRunning() calls on the same setup cycle.
-
-if session.isRunning {
-    session.stopRunning()
-}
-// Release session/output references without input/output removal churn.
-```
-
 ### File Path Issues
 
 Always use absolute paths:
@@ -902,16 +708,11 @@ xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug b
 xcodebuild -project freewrite.xcodeproj -scheme freewrite -configuration Debug clean build
 ```
 
-## Testing Video Feature
+## Testing Existing Video Playback
 
-1. Build and run app
-2. Grant camera/microphone permissions when prompted
-3. Click video camera icon in bottom nav
-4. Click "Start Recording" (turns red)
-5. Record for a few seconds
-6. Click "Stop Recording"
-7. Recorder overlay closes, new video entry is selected, and video opens immediately playing muted
-8. Click video entry to play it
+1. Open a journal containing an existing video entry and show History.
+2. Verify the video row displays a thumbnail, including when the entry has no cached thumbnail.
+3. Select the row to verify playback. If `transcript.md` is present, use **Copy Transcript** and check the clipboard.
 
 ## Video Thumbnail Generation
 
@@ -926,7 +727,7 @@ func generateVideoThumbnail(from url: URL) -> NSImage? {
 }
 ```
 
-Generated at save time and stored in the per-entry video directory; sidebar loads this cached image file.
+The sidebar loads the cached thumbnail, or generates and stores one if it is missing.
 
 ## Feature Flags / Settings
 
@@ -977,8 +778,7 @@ Button(action: {
 
 Enable console output in Xcode to see:
 - File loading: "Processing: [filename]"
-- Entry creation: "Successfully created video entry"
-- Errors: "Error saving video entry: ..."
+- Video playback: "Successfully loaded video entry: [filename]"
 
 Check `~/Documents/Quick Note/` in Finder to verify files are being created.
 
@@ -1002,8 +802,6 @@ The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeSc
 ## Key SwiftUI Patterns Used
 
 - `@State` for local view state
-- `@StateObject` for CameraManager
-- `.overlay { if showingVideoRecording { ... } }` for immersive video recording
 - `.onChange(of:)` for auto-save
 - `.onAppear` for initialization
 - `ForEach(entries)` with `Identifiable` for list rendering
@@ -1011,15 +809,14 @@ The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeSc
 
 ## Summary
 
-Quick Note is a straightforward macOS writing app with video recording capabilities. All data is local, no backend required. The main complexity is in:
+Quick Note is a local-first macOS writing app that also plays existing video entries. The main complexity is in:
 
 1. Proper file management and UUID-based naming
 2. Thread-safe array mutations for entries
-3. AVFoundation camera setup with proper configuration blocks
-4. Conditional rendering between text and video content
+3. Compatibility with legacy video layouts and conditional rendering between text and video content
 
 When making changes, always:
-- Test with actual video recording
+- When changing History or media code, test with an existing video entry
 - Check for collection mutation crashes
 - Verify files are created in correct location
 - Ensure privacy permissions are properly configured
@@ -1029,7 +826,7 @@ When making changes, always:
 Design direction is captured in `PRODUCT.md`, `DESIGN.md`, and `.impeccable.md`. The visual system ("The Quiet Page") is **strictly monochrome, ink-only** — identity lives in typography and whitespace, never in accent color.
 
 ### Users
-Distraction-free writers and journalers who want to capture thoughts the moment they happen, without ceremony. They free-write, record short video thoughts, and revisit entries later — often in quiet or late-night moments, in flow. The tool should stay out of the way so the thinking stays theirs.
+Distraction-free writers and journalers who want to capture thoughts the moment they happen, without ceremony. They free-write and revisit entries later, including existing video notes. The tool should stay out of the way so the thinking stays theirs.
 
 ### Brand Personality
 Fast, light, frictionless. Calm, minimal, human. The voice is a friend, not a tool or a therapist — warm, direct, slightly casual, never clinical, never corporate. The interface is quiet and nearly invisible so the writing is the only thing on screen.
