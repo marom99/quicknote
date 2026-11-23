@@ -12,6 +12,14 @@ enum DestinationSaveMode: String, Codable, Equatable, CaseIterable {
         case .existing: return "Existing note"
         }
     }
+
+    var explanation: String {
+        switch self {
+        case .newNote: return "Creates one file per session."
+        case .rolling: return "One file per day, week, or month."
+        case .existing: return "Writes to a note you choose."
+        }
+    }
 }
 
 enum NewNoteFilenameFormat: String, Codable, Equatable, CaseIterable {

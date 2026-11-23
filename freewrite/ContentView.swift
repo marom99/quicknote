@@ -1212,6 +1212,7 @@ struct ContentView: View {
     }
 
     private func openDestinationSettings() {
+        guard !showingDestinationSettings else { return }
         syncSettingsDraftFromActiveDestination()
         withAnimation(.easeInOut(duration: 0.2)) {
             showingSidebar = false
@@ -1233,11 +1234,13 @@ struct ContentView: View {
         guard let destination = destinationStore.activeDestination else { return false }
         let draftDisplayName = settingsDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedDisplayName = destination.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draftFilenameFormat = settingsFilenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedFilenameFormat = destination.filenameFormat.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return draftDisplayName != savedDisplayName
+        return (!draftDisplayName.isEmpty && draftDisplayName != savedDisplayName)
             || settingsSaveMode != destination.saveMode
             || settingsRollingPeriod != destination.rollingPeriod
-            || settingsFilenameFormat != destination.filenameFormat
+            || (!draftFilenameFormat.isEmpty && draftFilenameFormat != savedFilenameFormat)
             || settingsNewNoteFilenameFormat != destination.newNoteFilenameFormat
             || settingsExistingNoteFilename != destination.existingNoteFilename
     }
@@ -1250,6 +1253,10 @@ struct ContentView: View {
             ) != nil
         }
         return true
+    }
+
+    private var canSaveDestinationSettings: Bool {
+        hasUnsavedDestinationSettingsChanges && isDestinationSettingsDraftValid
     }
 
     private func closeDestinationSettingsRail() {
@@ -1297,8 +1304,7 @@ struct ContentView: View {
     }
 
     private func saveDestinationSettingsDraft() {
-        guard let destination = destinationStore.activeDestination else { return }
-        guard isDestinationSettingsDraftValid else { return }
+        guard canSaveDestinationSettings, let destination = destinationStore.activeDestination else { return }
 
         if isCapturePerSessionMode, inProgressCaptureFilename != nil {
             finalizeCaptureSession()
@@ -1391,6 +1397,9 @@ struct ContentView: View {
         }
 
         destinationStore.activateDestination(id: id)
+        if showingDestinationSettings {
+            syncSettingsDraftFromActiveDestination()
+        }
         historyTrash = nil
         trashedEntry = nil
         // Defer journal reload so ForEach(entries) isn't mid-update when History is open.
@@ -2015,11 +2024,7 @@ struct ContentView: View {
                     openHistorySidebar()
                 }
             },
-            openDestinationSettings: {
-                if !showingDestinationSettings {
-                    openDestinationSettings()
-                }
-            }
+            openDestinationSettings: openDestinationSettings
         ))
         .background(WindowTitleAccessor(title: currentEntryTitle, isDark: colorScheme == .dark))
         .background(QuickCaptureWindowAccessor(capture: startQuickCapture))
@@ -2349,10 +2354,15 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                             .lineLimit(3)
                             .textSelection(.enabled)
+
+                        Button("Reveal in Finder", action: revealActiveDestinationInFinder)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(destinationStore.activeDocumentsPath == nil)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Save write as?")
+                        Text("Save mode")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
 
@@ -2360,17 +2370,27 @@ struct ContentView: View {
                             Button {
                                 settingsSaveMode = mode
                             } label: {
-                                HStack(spacing: 8) {
+                                HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: currentMode == mode ? "circle.inset.filled" : "circle")
                                         .font(.system(size: 12))
                                         .foregroundColor(textColor)
-                                    Text(mode.displayName)
-                                        .font(.system(size: 13))
-                                        .foregroundColor(textColor)
+                                        .padding(.top, 2)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mode.displayName)
+                                            .font(.system(size: 13))
+                                            .foregroundColor(textColor)
+                                        Text(mode.explanation)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
                                     Spacer()
                                 }
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(mode.displayName)
+                            .accessibilityHint(mode.explanation)
+                            .accessibilityAddTraits(currentMode == mode ? .isSelected : [])
                         }
                     }
 
@@ -2480,30 +2500,27 @@ struct ContentView: View {
                             .foregroundColor(textColor)
                         }
                     }
-
-                    HStack(spacing: 10) {
-                        Button("Cancel") {
-                            cancelDestinationSettingsChangesAndClose()
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundColor(textColor)
-
-                        Spacer()
-
-                        Button("Save") {
-                            saveDestinationSettingsDraft()
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(textColor)
-                        .opacity((hasUnsavedDestinationSettingsChanges && isDestinationSettingsDraftValid) ? 1 : 0.45)
-                        .disabled(!hasUnsavedDestinationSettingsChanges || !isDestinationSettingsDraftValid)
-                    }
                 }
                 .padding(16)
             }
             .scrollIndicators(.never)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Cancel", action: cancelDestinationSettingsChangesAndClose)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                Button("Save", action: saveDestinationSettingsDraft)
+                    .buttonStyle(.bordered)
+                    .disabled(!canSaveDestinationSettings)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 

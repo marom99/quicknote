@@ -48,6 +48,48 @@ final class freewriteUITests: XCTestCase {
     }
 
     @MainActor
+    func testDestinationSettingsOnlyPersistOnSave() throws {
+        let app = XCUIApplication()
+        let name = app.textFields["Display name"]
+        let save = app.buttons["Save"]
+
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(app.buttons["Reveal in Finder"].isEnabled)
+        let originalName = try XCTUnwrap(name.value as? String)
+        let editedName = "Journal \(UUID().uuidString.prefix(8))"
+
+        func enterName(_ newName: String) {
+            name.click()
+            name.typeKey("a", modifierFlags: .command)
+            name.typeText(newName)
+        }
+
+        enterName(editedName)
+        XCTAssertTrue(save.isEnabled)
+
+        app.terminate()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertEqual(name.value as? String, originalName)
+
+        enterName(editedName)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+
+        app.terminate()
+        app.launch()
+        app.typeKey(",", modifierFlags: .command)
+        XCTAssertEqual(name.value as? String, editedName)
+
+        enterName(originalName)
+        save.click()
+        XCTAssertFalse(save.isEnabled)
+    }
+
+    @MainActor
     func testEditorKeepsFocusAfterThemeToggleThenHistorySelection() throws {
         let app = XCUIApplication()
         app.launch()
