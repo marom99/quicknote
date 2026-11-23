@@ -169,6 +169,31 @@ struct RailRemovalObserver: NSViewRepresentable {
     }
 }
 
+private struct NativeTooltip: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> TooltipView {
+        TooltipView()
+    }
+
+    func updateNSView(_ nsView: TooltipView, context: Context) {
+        if nsView.toolTip != text {
+            nsView.toolTip = text
+        }
+    }
+
+    final class TooltipView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+private extension View {
+    func nativeTooltip(_ text: String) -> some View {
+        background(NativeTooltip(text: text).accessibilityHidden(true))
+            .accessibilityHint(Text(text))
+    }
+}
+
 struct FreewriteTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var scrollRequest: EditorScrollRequest?
@@ -1857,7 +1882,7 @@ struct ContentView: View {
                                     .fixedSize()
                             }
                             .buttonStyle(.plain)
-                            .help("Start a new note")
+                            .nativeTooltip("Start a new note")
                             .foregroundColor(isHoveringNewEntry ? textHoverColor : textColor)
                             .onHover { hovering in
                                 isHoveringNewEntry = hovering
@@ -1882,7 +1907,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringThemeToggle ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
-                            .help(colorScheme == .light ? "Switch to dark mode" : "Switch to light mode")
+                            .nativeTooltip(colorScheme == .light ? "Switch to dark mode" : "Switch to light mode")
                             .accessibilityIdentifier("themeToggleButton")
                             .onHover { hovering in
                                 isHoveringThemeToggle = hovering
@@ -1905,7 +1930,7 @@ struct ContentView: View {
                                     .foregroundColor(isHoveringClock ? textHoverColor : textColor)
                             }
                             .buttonStyle(.plain)
-                            .help(showingSidebar ? "Hide History" : "Show History")
+                            .nativeTooltip(showingSidebar ? "Hide History" : "Show History")
                             .accessibilityIdentifier("historyButton")
                             .onHover { hovering in
                                 isHoveringClock = hovering
@@ -1995,10 +2020,10 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .help("Reveal destination in Finder")
                     .accessibilityIdentifier("historyHeader")
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
+                    .nativeTooltip("Reveal destination in Finder")
                     .onHover { hovering in
                         isHoveringHistory = hovering
                     }
@@ -2424,7 +2449,7 @@ struct ContentView: View {
         }
         .menuStyle(.borderlessButton)
         .opacity(isHoveringDestinationChip ? 1 : (colorScheme == .light ? 0.5 : 0.45))
-        .help("Switch or manage save destinations")
+        .nativeTooltip("Switch or manage save destinations")
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)
         .onHover { hovering in
