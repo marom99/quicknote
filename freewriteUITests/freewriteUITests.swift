@@ -315,6 +315,48 @@ final class freewriteUITests: XCTestCase {
         XCTAssertTrue((editor.value as? String ?? "").contains("QQ"), "Typed text did not reach the editor")
     }
 
+    @MainActor
+    func testSearchNotesOpensAndCancelsUsingOnlyTheKeyboard() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let tag = UUID().uuidString.prefix(8).lowercased()
+        let editor = app.textViews["mainEditor"]
+        let query = app.textFields["historySearchField"]
+        app.typeKey("n", modifierFlags: .command)
+        app.typeText("Search first \(tag)\nfirst match \(tag)")
+        app.typeKey("n", modifierFlags: .command)
+        app.typeText("Search second \(tag)\nsecond match \(tag)")
+        app.typeKey("n", modifierFlags: .command)
+        app.typeText("Unchanged draft")
+
+        app.typeKey("p", modifierFlags: .command)
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        app.typeText("notfound\(tag)")
+        XCTAssertTrue(app.staticTexts["historySearchEmpty"].exists)
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(query.exists)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(query.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "Unchanged draft")
+        app.typeText(" stays")
+        XCTAssertEqual(editor.value as? String, "Unchanged draft stays")
+
+        app.typeKey("p", modifierFlags: .command)
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        app.typeText("match \(tag)")
+        XCTAssertTrue(app.staticTexts["Search first \(tag)"].exists)
+        XCTAssertTrue(app.staticTexts["Search second \(tag)"].exists)
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(query.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "Search first \(tag)\nfirst match \(tag)")
+        app.typeText("!")
+        XCTAssertTrue((editor.value as? String ?? "").contains("!"))
+    }
+
     private func hasKeyboardFocus(_ element: XCUIElement) -> Bool {
         element.value(forKey: "hasKeyboardFocus") as? Bool ?? false
     }

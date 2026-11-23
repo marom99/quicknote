@@ -6,6 +6,7 @@ struct EditorCommandsTests {
     @Test(arguments: [
         (EditorCommand.newEntry, KeyboardShortcut("n", modifiers: .command)),
         (.openHistory, KeyboardShortcut("h", modifiers: [.command, .shift])),
+        (.searchNotes, KeyboardShortcut("p", modifiers: .command)),
         (.openDestinationSettings, KeyboardShortcut(",", modifiers: .command))
     ])
     func commandUsesExpectedShortcutAndHandler(command: EditorCommand, shortcut: KeyboardShortcut) {
@@ -13,6 +14,7 @@ struct EditorCommandsTests {
         let actions = EditorCommandActions(
             newEntry: { calls.append(.newEntry) },
             openHistory: { calls.append(.openHistory) },
+            searchNotes: { calls.append(.searchNotes) },
             openDestinationSettings: { calls.append(.openDestinationSettings) }
         )
 
