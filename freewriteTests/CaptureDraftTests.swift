@@ -110,7 +110,8 @@ struct CaptureDraftTests {
             try f.store.save(&draft, in: f.destination)
         }
 
-        var recovered = try #require(CaptureDraftStore(url: f.store.url).load())
+        let restored = try CaptureDraftStore(url: f.store.url).load()
+        var recovered = try #require(restored)
         #expect(recovered == draft)
         try FileManager.default.createDirectory(at: f.destination, withIntermediateDirectories: false)
         let url = try #require(f.store.save(&recovered, in: f.destination))
@@ -151,7 +152,8 @@ struct CaptureDraftTests {
         try f.store.preserve(draft)
         try output.write(to: file)
 
-        var recovered = try #require(f.store.load())
+        let restored = try f.store.load()
+        var recovered = try #require(restored)
         #expect(try f.store.save(&recovered, in: f.destination) == file)
         #expect(try Data(contentsOf: file) == output)
         #expect(try f.store.load() == nil)
