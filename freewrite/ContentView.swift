@@ -1024,12 +1024,11 @@ struct ContentView: View {
         saveEntry(entry: entry)
     }
 
-    private enum CaptureFinalization {
-        case noCapture, saved, failed
+    private enum EntryDeparture {
+        case ready, captureSaved, failed
     }
 
-    private func finalizeCaptureSession() -> CaptureFinalization {
-        guard isCapturePerSessionMode, let draftFilename = inProgressCaptureFilename else { return .noCapture }
+    private func finalizeCaptureSession(draftFilename: String) -> EntryDeparture {
         guard let documentsDirectory = getDocumentsDirectory() else {
             noteSaveError = draftFilename
             return .failed
@@ -1040,7 +1039,7 @@ struct ContentView: View {
             deleteCaptureFileIfExists(draftFilename)
             removeEntry(withFilename: draftFilename)
             beginFreshCaptureSession(clearText: true)
-            return .noCapture
+            return .ready
         }
 
         guard let entry = entries.first(where: { $0.filename == draftFilename }),
@@ -1082,7 +1081,7 @@ struct ContentView: View {
         text = ""
         isLoadingEntry = false
         placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
-        return .saved
+        return .captureSaved
     }
 
     private func entryDisplayDate(from date: Date) -> String {
@@ -1413,8 +1412,12 @@ struct ContentView: View {
     }
 
     private func prepareToLeaveEntry() -> Bool {
-        if isCapturePerSessionMode, inProgressCaptureFilename != nil {
-            return finalizeCaptureSession() != .failed
+        finishEditingEntry() != .failed
+    }
+
+    private func finishEditingEntry() -> EntryDeparture {
+        if isCapturePerSessionMode, let draftFilename = inProgressCaptureFilename {
+            return finalizeCaptureSession(draftFilename: draftFilename)
         } else if let currentId = selectedEntryId,
                   let currentEntry = entries.first(where: { $0.id == currentId }),
                   currentEntry.entryType == .text,
@@ -1424,10 +1427,10 @@ struct ContentView: View {
             } ?? true
             if hasUnsavedChanges {
                 noteSaveError = currentEntry.filename
-                return false
+                return .failed
             }
         }
-        return true
+        return .ready
     }
 
     private func reloadJournalForActiveDestination() {
@@ -2390,21 +2393,15 @@ struct ContentView: View {
     private func createNewEntry() {
         editorFocusRequest = UUID()
         savedConfirmation = nil
+        let departure = finishEditingEntry()
+        guard departure != .failed else { return }
+
         let didSave: Bool
         // Rolling / Existing: re-bind to current period/target and append a session separator.
         if activeSaveMode == .rolling || activeSaveMode == .existing {
-            if let currentId = selectedEntryId,
-               let currentEntry = entries.first(where: { $0.id == currentId }),
-               currentEntry.entryType == .text,
-               !saveEntry(entry: currentEntry, updatePreview: false) {
-                // Keep unsaved text in the editor instead of reloading the file from disk.
-                return
-            }
             didSave = bindToResolvedWriteTarget(appendSeparator: true)
         } else {
-            let result = finalizeCaptureSession()
-            guard result != .failed else { return }
-            didSave = result == .saved
+            didSave = departure == .captureSaved
             beginFreshCaptureSession(clearText: true)
         }
 
@@ -2807,7 +2804,7 @@ struct ContentView: View {
         guard var trash = historyTrash,
               trashDestinationID == destinationStore.activeDestinationId else { return }
         do {
-            if trashedEntryWasSelected, finalizeCaptureSession() == .failed {
+            if trashedEntryWasSelected, !prepareToLeaveEntry() {
                 return
             }
             let restoredURLs = try trash.restore(finalizeCaptureDrafts: true)

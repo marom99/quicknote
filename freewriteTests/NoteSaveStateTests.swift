@@ -3,6 +3,26 @@ import Testing
 @testable import freewrite
 
 struct NoteSaveStateTests {
+    @Test func failedSaveToLockedNotePreservesLoadedBaselineAndDiskText() throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("history.md")
+        let original = "Saved text"
+        try Data(original.utf8).write(to: url)
+        var state = NoteSaveState()
+        let loaded = try state.load(from: url)
+        try fileManager.setAttributes([.immutable: true], ofItemAtPath: url.path)
+        defer { try? fileManager.setAttributes([.immutable: false], ofItemAtPath: url.path) }
+
+        let edited = loaded + " plus unsaved text"
+        #expect(throws: (any Error).self) { try state.save(edited, to: url) }
+        #expect(state.hasUnsavedChanges(edited, at: url))
+        #expect(!state.hasUnsavedChanges(loaded, at: url))
+        #expect(try Data(contentsOf: url) == Data(original.utf8))
+    }
+
     @Test func unboundExistingEditRecreatesTargetWithPreviouslySavedText() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
