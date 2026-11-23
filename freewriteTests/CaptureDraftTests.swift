@@ -15,10 +15,11 @@ struct CaptureDraftTests {
 
         func cleanUp() { try? FileManager.default.removeItem(at: root) }
 
-        func draft(_ mode: DestinationSaveMode, format: NewNoteFilenameFormat = .date) -> CaptureDraft {
+        func draft(_ mode: DestinationSaveMode, format: NewNoteFilenameFormat = .date,
+                   calendar: Calendar = .current) -> CaptureDraft {
             CaptureDraft(destination: .init(id: UUID(), displayName: "Original", isDefault: true, saveMode: mode,
                                              newNoteFilenameFormat: format, existingNoteFilename: "Keep.md"),
-                         startedAt: Date(timeIntervalSince1970: 1_700_000_000))
+                         startedAt: Date(timeIntervalSince1970: 1_700_000_000), calendar: calendar)
         }
 
         func target(for draft: CaptureDraft) throws -> URL {
@@ -110,6 +111,24 @@ struct CaptureDraftTests {
 
         #expect(try f.store.save(&draft, in: f.destination) == file)
         #expect(try String(contentsOf: file, encoding: .utf8) == draft.separator + draft.text)
+    }
+
+    @Test(arguments: [0, 9])
+    func recoveredRollingCaptureKeepsItsOriginalDay(hourOffset: Int) throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: hourOffset * 3600))
+        var draft = f.draft(.rolling, calendar: calendar)
+        draft.text = "Captured while traveling"
+        try f.store.preserve(draft)
+        let restored = try f.store.load()
+        var recovered = try #require(restored)
+
+        let saved = try #require(f.store.save(&recovered, in: f.destination))
+
+        #expect(saved.lastPathComponent == (hourOffset == 0 ? "2023-11-14.md" : "2023-11-15.md"))
+        #expect(try String(contentsOf: saved, encoding: .utf8) == draft.separator + draft.text)
     }
 
     @Test func missingDestinationLeavesDraftForRetryInTheOriginalDestination() throws {

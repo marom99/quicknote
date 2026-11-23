@@ -11,17 +11,18 @@ struct CaptureDraft: Codable, Equatable {
 
     let destination: SaveDestination
     let startedAt: Date
-    let separator: String
+    let calendar: Calendar
     var text = ""
     var pendingWrite: PendingWrite?
 
-    init(destination: SaveDestination, startedAt: Date = Date()) {
+    init(destination: SaveDestination, startedAt: Date = Date(), calendar: Calendar = .current) {
         self.destination = destination
         self.startedAt = startedAt
-        self.separator = DestinationWriteTarget.sessionSeparator(at: startedAt)
+        self.calendar = calendar
     }
 
     var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var separator: String { DestinationWriteTarget.sessionSeparator(at: startedAt, calendar: calendar) }
 }
 
 struct CaptureDraftStore {
@@ -109,7 +110,7 @@ struct CaptureDraftStore {
         if let pendingWrite = draft.pendingWrite {
             filename = pendingWrite.filename
         } else if mode == .newNote {
-            let date = DestinationWriteTarget.dateCaptureBasename(now: draft.startedAt)
+            let date = DestinationWriteTarget.dateCaptureBasename(now: draft.startedAt, calendar: draft.calendar)
             let title = draft.destination.newNoteFilenameFormat == .title
                 ? DestinationWriteTarget.sanitizedTitleBasename(from: draft.text) : nil
             filename = DestinationWriteTarget.uniqueMarkdownFilename(
@@ -117,7 +118,7 @@ struct CaptureDraftStore {
             )
         } else {
             guard let target = DestinationWriteTarget.resolve(for: draft.destination, documentsURL: directory,
-                    now: draft.startedAt, fileManager: fileManager, createIfMissing: false),
+                    now: draft.startedAt, calendar: draft.calendar, fileManager: fileManager, createIfMissing: false),
                   mode != .existing || target.fileExists else { throw SaveError.missingTarget }
             filename = target.filename
         }
