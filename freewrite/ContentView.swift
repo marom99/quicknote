@@ -1176,6 +1176,7 @@ struct ContentView: View {
     @State private var isHoveringHistoryArrow = false
     @State private var isHoveringCopyTranscript = false
     @State private var isHoveringDestinationChip = false
+    @State private var showingDestinationPicker = false
     @State private var settingsDisplayName: String = ""
     @State private var settingsSaveMode: DestinationSaveMode = .newNote
     @State private var settingsRollingPeriod: RollingPeriod = .daily
@@ -3151,36 +3152,20 @@ struct ContentView: View {
 
     @ViewBuilder
     private func destinationChip() -> some View {
-        Menu {
-            ForEach(destinationStore.destinations) { destination in
-                Button {
-                    switchToDestination(id: destination.id)
-                } label: {
-                    HStack {
-                        Text(destination.displayName)
-                        Spacer()
-                        if destination.id == destinationStore.activeDestinationId {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button("Destination settings…") {
-                openDestinationSettings()
-            }
-            Button("Add destination…") {
-                // Dismiss the SwiftUI Menu before presenting NSOpenPanel.
-                // Presenting the panel synchronously from a Menu action can race
-                // AppKit's open-panel restore and show "The file couldn’t be opened."
-                DispatchQueue.main.async {
-                    addDestinationFromFolderPicker()
-                }
-            }
+        Button {
+            showingDestinationPicker.toggle()
         } label: {
-            DestinationMenuLabel(name: activeDestinationDisplayName)
+            HStack(spacing: 4) {
+                DestinationMenuLabel(name: activeDestinationDisplayName)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(showingDestinationPicker ? 180 : 0))
+                    .animation(.easeOut(duration: 0.14), value: showingDestinationPicker)
+            }
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("destinationChip")
+        .background(destinationPickerPresenter())
         .opacity(isHoveringDestinationChip ? 1 : (colorScheme == .light ? 0.5 : 0.45))
         .nativeTooltip("Switch or manage save destinations")
         .fixedSize(horizontal: true, vertical: true)
@@ -3193,6 +3178,48 @@ struct ContentView: View {
             } else {
                 NSCursor.pop()
             }
+        }
+    }
+
+    private func destinationPickerPresenter() -> DestinationPickerPresenter {
+        DestinationPickerPresenter(
+            isPresented: $showingDestinationPicker,
+            destinations: destinationStore.destinations.map {
+                DestinationPickerItem(id: $0.id, name: $0.displayName)
+            },
+            activeID: destinationStore.activeDestinationId,
+            colorScheme: colorScheme,
+            onChoose: chooseDestinationFromPicker,
+            onAdd: addDestinationFromPicker,
+            onSettings: openDestinationSettingsFromPicker,
+            onDismiss: { showingDestinationPicker = false }
+        )
+    }
+
+    private func chooseDestinationFromPicker(_ id: UUID) {
+        showingDestinationPicker = false
+        guard id != destinationStore.activeDestinationId else { return }
+        // Switch on the next run loop so the popover is gone before a save-failure
+        // confirmation can be presented from the destination switch.
+        DispatchQueue.main.async {
+            switchToDestination(id: id)
+        }
+    }
+
+    private func openDestinationSettingsFromPicker() {
+        showingDestinationPicker = false
+        DispatchQueue.main.async {
+            openDestinationSettings()
+        }
+    }
+
+    private func addDestinationFromPicker() {
+        showingDestinationPicker = false
+        // Dismiss the popover before presenting NSOpenPanel.
+        // Presenting the panel synchronously from a menu-like action can race
+        // AppKit's open-panel restore and show "The file couldn’t be opened."
+        DispatchQueue.main.async {
+            addDestinationFromFolderPicker()
         }
     }
 
