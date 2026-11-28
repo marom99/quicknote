@@ -269,7 +269,10 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
             let attributes = storage.attributes(at: index, effectiveRange: nil)
             let hidden = attributes[.markdownHidden] != nil
             var glyph = glyphs[offset]
-            if !hidden {
+            if attributes[.markdownTask] != nil {
+                var space: UInt16 = 0x20
+                guard CTFontGetGlyphsForCharacters(font, &space, &glyph, 1) else { continue }
+            } else if !hidden {
                 guard var character = attributes[.markdownGlyph] as? UInt16,
                       CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { continue }
             }
@@ -310,6 +313,197 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         let wasMarked = hasMarkedText()
         super.unmarkText()
         if wasMarked { onMarkedTextChange?() }
+    }
+
+    struct TaskBox {
+        let characterIndex: Int
+        let rect: NSRect
+    }
+
+    private static let taskPressScale: CGFloat = 0.9
+
+    private var taskTrackingArea: NSTrackingArea?
+    private var hoveredTaskCharacter: Int?
+    private var pressedTaskCharacter: Int?
+
+    /// Every checkbox laid out inside `rect`, in text view coordinates.
+    func taskBoxes(in rect: NSRect) -> [TaskBox] {
+        guard !showsMarkdownSource, let layout = layoutManager, let container = textContainer,
+              let storage = textStorage, storage.length > 0, rect.width > 0, rect.height > 0 else { return [] }
+        layout.ensureLayout(for: container)
+        let glyphRange = layout.glyphRange(
+            forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y),
+            in: container
+        )
+        let characterRange = layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        var boxes: [TaskBox] = []
+        storage.enumerateAttribute(.markdownTask, in: characterRange) { value, range, _ in
+            guard value != nil, let box = taskBoxRect(at: range.location) else { return }
+            boxes.append(TaskBox(characterIndex: range.location, rect: box))
+        }
+        return boxes
+    }
+
+    /// The checkbox whose `[` sits at `characterIndex`, in text view coordinates.
+    func taskBoxRect(at characterIndex: Int) -> NSRect? {
+        guard !showsMarkdownSource, let layout = layoutManager, let container = textContainer,
+              let storage = textStorage, characterIndex >= 0, characterIndex < storage.length,
+              storage.attribute(.markdownTask, at: characterIndex, effectiveRange: nil) != nil else { return nil }
+        layout.ensureLayout(for: container)
+        let glyphIndex = layout.glyphIndexForCharacter(at: characterIndex)
+        guard glyphIndex < layout.numberOfGlyphs else { return nil }
+        let font = storage.attribute(.font, at: characterIndex, effectiveRange: nil) as? NSFont
+            ?? .systemFont(ofSize: FreewriteTextEditor.bodyFontSize)
+        let size = EditorMarkdown.taskBoxSize(forFontSize: font.pointSize)
+        let slot = EditorMarkdown.taskSlotWidth(forFontSize: font.pointSize)
+        let lineRect = layout.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+        let location = layout.location(forGlyphAt: glyphIndex)
+        let centreY = textContainerOrigin.y + lineRect.minY + location.y - font.capHeight / 2
+        return NSRect(x: textContainerOrigin.x + lineRect.minX + location.x + (slot - size) / 2, y: centreY - size / 2,
+                      width: size, height: size)
+    }
+
+    /// Starts a press on a checkbox and returns whether the point landed on one.
+    @discardableResult
+    func beginTaskPress(at point: NSPoint) -> Bool {
+        guard let box = taskBoxes(in: NSRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48))
+            .first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }) else { return false }
+        pressedTaskCharacter = box.characterIndex
+        setNeedsDisplay(box.rect.insetBy(dx: -3, dy: -3))
+        return true
+    }
+
+    /// Finishes a press started on a checkbox, toggling it when the release stayed inside.
+    func endTaskPress(at point: NSPoint) {
+        guard let pressed = pressedTaskCharacter else { return }
+        pressedTaskCharacter = nil
+        guard let rect = taskBoxRect(at: pressed) else { return }
+        setNeedsDisplay(rect.insetBy(dx: -3, dy: -3))
+        if rect.insetBy(dx: -2, dy: -2).contains(point) { toggleTask(at: pressed) }
+    }
+
+    /// Flips the task item owning the checkbox at `characterIndex` between `[ ]` and `[x]`.
+    @discardableResult
+    func toggleTask(at characterIndex: Int) -> Bool {
+        guard let storage = textStorage, let state = EditorMarkdown.taskStateRange(in: string, at: characterIndex),
+              let toggled = EditorMarkdown.toggledTask(in: string, at: characterIndex) else { return false }
+        let replacement = (toggled as NSString).substring(with: state)
+        let selection = selectedRange()
+        breakUndoCoalescing()
+        guard shouldChangeText(in: state, replacementString: replacement) else { return false }
+        storage.replaceCharacters(in: state, with: replacement)
+        didChangeText()
+        if selectedRange() != selection { setSelectedRange(selection) }
+        breakUndoCoalescing()
+        return true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if beginTaskPress(at: convert(event.locationInWindow, from: nil)) { return }
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressedTaskCharacter != nil else { return super.mouseUp(with: event) }
+        endTaskPress(at: convert(event.locationInWindow, from: nil))
+        if let window, window.firstResponder !== self { window.makeFirstResponder(self) }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard pressedTaskCharacter == nil else { return }
+        super.mouseDragged(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateTaskHover(at: convert(event.locationInWindow, from: nil))
+        super.mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateTaskHover(at: nil)
+        super.mouseExited(with: event)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let taskTrackingArea { removeTrackingArea(taskTrackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        taskTrackingArea = area
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for box in taskBoxes(in: visibleRect) {
+            addCursorRect(box.rect, cursor: .pointingHand)
+        }
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        pressedTaskCharacter = nil
+        updateTaskHover(at: nil)
+        window?.invalidateCursorRects(for: self)
+    }
+
+    private func updateTaskHover(at point: NSPoint?) {
+        let hovered = point.flatMap { point in
+            taskBoxes(in: NSRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48))
+                .first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) })
+        }?.characterIndex
+        guard hovered != hoveredTaskCharacter else { return }
+        let previous = hoveredTaskCharacter
+        hoveredTaskCharacter = hovered
+        if hovered != nil {
+            NSCursor.pointingHand.set()
+        } else if let point, bounds.contains(point) {
+            NSCursor.iBeam.set()
+        }
+        for character in [previous, hovered].compactMap({ $0 }) {
+            if let rect = taskBoxRect(at: character) { setNeedsDisplay(rect.insetBy(dx: -3, dy: -3)) }
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if !showsMarkdownSource, let storage = textStorage {
+            for box in taskBoxes(in: dirtyRect) {
+                let checked = storage.attribute(.markdownTask, at: box.characterIndex, effectiveRange: nil) as? Bool ?? false
+                let ink = storage.attribute(.foregroundColor, at: box.characterIndex, effectiveRange: nil) as? NSColor
+                    ?? .textColor
+                drawTaskBox(box.rect,
+                            checked: checked,
+                            hovered: hoveredTaskCharacter == box.characterIndex,
+                            pressed: pressedTaskCharacter == box.characterIndex,
+                            ink: ink)
+            }
+        }
+        super.draw(dirtyRect)
+    }
+
+    private func drawTaskBox(_ rect: NSRect, checked: Bool, hovered: Bool, pressed: Bool, ink: NSColor) {
+        let scale = pressed ? Self.taskPressScale : 1
+        let width = rect.width * scale
+        let box = NSRect(x: rect.midX - width / 2, y: rect.midY - width / 2, width: width, height: width)
+        let radius = width * 0.29
+        let lineWidth = max(1.5, width * 0.13)
+        let lit = hovered || pressed
+        if lit {
+            NSColor.controlAccentColor.withAlphaComponent(pressed ? 0.22 : 0.14).setFill()
+            NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+        }
+        if checked {
+            let inner = box.insetBy(dx: width * 0.26, dy: width * 0.26)
+            ink.withAlphaComponent(lit ? 0.78 : 0.68).setFill()
+            NSBezierPath(roundedRect: inner, xRadius: radius * 0.45, yRadius: radius * 0.45).fill()
+        }
+        ink.withAlphaComponent(checked ? 0.72 : (lit ? 0.8 : 0.5)).setStroke()
+        let ring = NSBezierPath(roundedRect: box.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+                                xRadius: max(radius - lineWidth / 2, 0.5), yRadius: max(radius - lineWidth / 2, 0.5))
+        ring.lineWidth = lineWidth
+        ring.stroke()
     }
 
     var allowsAutomaticFocus = true {
@@ -773,7 +967,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
             guard let storage = textView.textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return }
             let view = textView as? FreewriteEditorTextView
             let headingPrefix = view?.liveHeadingLineStart.flatMap { EditorMarkdown.atxPrefix(in: storage.string, at: $0) }
-            let taskPrefix = view?.liveTaskLineStart.flatMap { EditorMarkdown.taskPrefix(in: storage.string, at: $0) }
+            let taskLine = view?.liveTaskLineStart ?? editingLines?.location
+            let taskPrefix = taskLine.flatMap { EditorMarkdown.taskPrefix(in: storage.string, at: $0) }
             EditorMarkdown.apply(to: storage, attributes: attributes, range: range, spans: projectedSpans,
                                  editingLines: editingLines, liveHeadingPrefix: headingPrefix, liveTaskPrefix: taskPrefix)
             textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
