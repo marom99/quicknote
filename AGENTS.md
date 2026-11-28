@@ -228,7 +228,7 @@ struct VideoPlayerView: View {
 ## Navigation Bar Items
 
 ### Left Side
-- **Destination**: Shows the active save destination and opens its menu.
+- **Destination**: Shows the active save destination and opens a popover listing every destination with a checkmark on the active one. The search field takes focus on open and filters by name; Up/Down move the highlight, Return switches, Esc or an outside click closes it. `Add destination…` and `Destination settings…` sit below a divider. Switching goes through the normal switch path.
 - **Copy Transcript**: Appears alongside the destination when viewing a video with a transcript.
 
 ### Right Side (Utilities)
