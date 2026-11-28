@@ -79,6 +79,12 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         return accepted
     }
 
+    /// The activating click into an inactive (pinned) window lands in the text,
+    /// so the caret is where it was clicked and typing can start at once.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned { onEditingFocusChange?() }
@@ -925,6 +931,9 @@ struct ContentView: View {
     @State private var noteSaveFailure: NoteSaveFailure?
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
+    @State private var isHoveringPin = false
+    // Pinned (always-on-top) window, persisted across launches; off by default.
+    @AppStorage(PinnedWindow.defaultsKey) private var windowPinned = false
     @State private var didCopyTranscript: Bool = false
     @State private var selectedVideoHasTranscript = false
     @State private var currentVideoURL: URL? = nil // Add state for current video being viewed
@@ -2084,6 +2093,28 @@ struct ContentView: View {
                                 }
                             }
 
+                            // Keep the window above other apps
+                            Button(action: {
+                                windowPinned.toggle()
+                            }) {
+                                Image(systemName: windowPinned ? "pin.fill" : "pin")
+                                    .foregroundColor(isHoveringPin ? textHoverColor : textColor)
+                            }
+                            .buttonStyle(.plain)
+                            .nativeTooltip(windowPinned ? "Stop keeping the window above other apps" : "Keep the window above other apps")
+                            .accessibilityIdentifier("pinWindowButton")
+                            .accessibilityLabel(windowPinned ? "Unpin window" : "Pin window above other apps")
+                            .accessibilityValue(windowPinned ? "Pinned" : "Not pinned")
+                            .onHover { hovering in
+                                isHoveringPin = hovering
+                                isHoveringBottomNav = hovering
+                                if hovering {
+                                    NSCursor.pointingHand.push()
+                                } else {
+                                    NSCursor.pop()
+                                }
+                            }
+
                             Text("•")
                                 .foregroundColor(.gray)
 
@@ -2299,6 +2330,7 @@ struct ContentView: View {
             }
         ))
         .background(QuickCaptureWindowAccessor(canAcceptCapture: canAcceptQuickCapture))
+        .background(PinnedWindowAccessor(pinned: windowPinned))
         .onReceive(NotificationCenter.default.publisher(for: .quickCaptureDidSave)) { notification in
             if let url = notification.object as? URL { receiveQuickCapture(at: url) }
         }
