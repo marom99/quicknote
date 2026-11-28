@@ -66,6 +66,12 @@ enum EditorMarkdown {
             }
         }
 
+        if let liveHeading, NSLocationInRange(liveHeading.location, range) {
+            let level = (storage.string as NSString).substring(with: liveHeading).prefix { $0 == "#" }.count
+            let anchor = NSRange(location: liveHeading.location, length: 1)
+            storage.addAttributes([.markdownCaretAnchor: true, .font: headingFont(bodyFont, level: level)], range: anchor)
+        }
+
         func apply(_ span: Span) {
             switch span.style {
             case .marker:
@@ -101,8 +107,7 @@ enum EditorMarkdown {
                     } else {
                         switch span.style {
                         case .heading(let level):
-                            let size = bodyFont.pointSize + CGFloat([8, 6, 4, 3, 2, 1][level - 1])
-                            styled = fonts.convert(fonts.convert(font, toHaveTrait: .boldFontMask), toSize: size)
+                            styled = headingFont(font, level: level)
                         case .bold, .tableHeader:
                             styled = fonts.convert(font, toHaveTrait: .boldFontMask)
                         case .boldItalic:
@@ -115,6 +120,11 @@ enum EditorMarkdown {
                     storage.addAttribute(.font, value: styled, range: range)
                 }
             }
+        }
+
+        func headingFont(_ font: NSFont, level: Int) -> NSFont {
+            let size = bodyFont.pointSize + CGFloat([8, 6, 4, 3, 2, 1][level - 1])
+            return fonts.convert(fonts.convert(font, toHaveTrait: .boldFontMask), toSize: size)
         }
     }
 
@@ -172,6 +182,7 @@ enum EditorMarkdown {
 
 extension NSAttributedString.Key {
     static let markdownHidden = Self("QuickNoteMarkdownHidden")
+    static let markdownCaretAnchor = Self("QuickNoteMarkdownCaretAnchor")
     static let markdownGlyph = Self("QuickNoteMarkdownGlyph")
     static let markdownList = Self("QuickNoteMarkdownList")
 }
