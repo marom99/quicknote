@@ -248,6 +248,16 @@ struct VideoPlayerView: View {
 - **Cmd+,**: Opens the active destination settings rail via `openDestinationSettings()`; does not reset unsaved edits if already open.
 - `EditorCommands` is attached to the app scene with `.commands`; it replaces `.newItem` and `.appSettings` to avoid duplicate shortcuts. `ContentView` publishes `EditorCommandActions` with `.focusedSceneValue`, so commands target only the focused window and are disabled without one.
 
+### Floating window (always on top)
+
+The main editor window always floats: `PinnedWindow` (`freewrite/PinnedWindow.swift`) sets its level to `.floating` and adds `.canJoinAllSpaces` + `.fullScreenAuxiliary` on attach, so it stays above other apps' normal windows and follows desktop Space switches without the user turning anything on. There is no toggle and no setting; `PinnedWindow.apply` also removes the legacy `windowPinned` key a previous build persisted, so no stale value can imply a choice.
+
+`NSWindow.didExitFullScreen`, `didDeminiaturize`, and `didChangeScreenParameters` re-apply the floating treatment after AppKit rebuilds the window, because full-screen and Minimize reset the level. Applying never orders the window front or un-minimizes it: Minimize stays the escape hatch, and ⌃⌘F full screen still works because collection behavior is left to AppKit while a window is full screen.
+
+Only the editor window is affected: `PinnedWindow.apply` ignores panels, so Quick Capture and the menu-bar extra are untouched, and `WindowChrome` keeps owning the title bar. The window stays an ordinary key window (no nonactivating panel), so menus, sheets, and keyboard shortcuts keep working. The editor's `acceptsFirstMouse` is true so the activating click into the floating window lands the caret, and the editor takes focus on `didBecomeKey` as before. `.floating` sits below `.modalPanel` and `.statusBar`, so system dialogs, menus, and other apps' modal panels still draw over it.
+
+macOS does not admit another app's ordinary window into a full-screen Space that already exists, whatever its level: only `NSPanel` windows (e.g. Quick Capture) appear there, and converting the editor into a panel would keep the app inactive and break its menus and shortcuts. So the floating window is visible over every desktop Space and every normal window, but not over another app's full-screen Space.
+
 ## Video Playback Flow
 
 1. User clicks video entry in sidebar

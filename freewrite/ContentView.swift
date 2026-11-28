@@ -79,6 +79,12 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         return accepted
     }
 
+    /// The activating click into an inactive (pinned) window lands in the text,
+    /// so the caret is where it was clicked and typing can start at once.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned { onEditingFocusChange?() }
@@ -2299,6 +2305,7 @@ struct ContentView: View {
             }
         ))
         .background(QuickCaptureWindowAccessor(canAcceptCapture: canAcceptQuickCapture))
+        .background(PinnedWindowAccessor())
         .onReceive(NotificationCenter.default.publisher(for: .quickCaptureDidSave)) { notification in
             if let url = notification.object as? URL { receiveQuickCapture(at: url) }
         }
