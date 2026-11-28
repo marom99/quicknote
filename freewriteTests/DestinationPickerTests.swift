@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import freewrite
 
@@ -96,5 +97,25 @@ struct DestinationPickerTests {
 
         selection.highlightFirst(in: filtered)
         #expect(selection.highlighted(in: filtered) == quickNote)
+    }
+
+    @Test func hangsBelowTheChipWhenTheScreenHasRoomUnderIt() {
+        let chip = CGRect(x: 100, y: 600, width: 80, height: 16)
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        #expect(DestinationPickerPlacement.edge(anchorOnScreen: chip, visibleScreen: screen) == .maxY)
+    }
+
+    @Test func flipsAboveTheChipWhenTheScreenEndsJustBelowIt() {
+        let chip = CGRect(x: 100, y: 40, width: 80, height: 16)
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        #expect(DestinationPickerPlacement.edge(anchorOnScreen: chip, visibleScreen: screen) == .minY)
+    }
+
+    @Test func flipsOnlyBelowTheRequiredHeight() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let exact = CGRect(x: 0, y: DestinationPickerPlacement.requiredHeight, width: 80, height: 16)
+        let short = CGRect(x: 0, y: DestinationPickerPlacement.requiredHeight - 1, width: 80, height: 16)
+        #expect(DestinationPickerPlacement.edge(anchorOnScreen: exact, visibleScreen: screen) == .maxY)
+        #expect(DestinationPickerPlacement.edge(anchorOnScreen: short, visibleScreen: screen) == .minY)
     }
 }

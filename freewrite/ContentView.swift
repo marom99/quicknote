@@ -2888,13 +2888,17 @@ struct ContentView: View {
         Button {
             showingDestinationPicker.toggle()
         } label: {
-            DestinationMenuLabel(name: activeDestinationDisplayName)
+            HStack(spacing: 4) {
+                DestinationMenuLabel(name: activeDestinationDisplayName)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(showingDestinationPicker ? 180 : 0))
+                    .animation(.easeOut(duration: 0.14), value: showingDestinationPicker)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("destinationChip")
-        .popover(isPresented: $showingDestinationPicker, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-            destinationPickerPopover()
-        }
+        .background(destinationPickerPresenter())
         .opacity(isHoveringDestinationChip ? 1 : (colorScheme == .light ? 0.5 : 0.45))
         .nativeTooltip("Switch or manage save destinations")
         .fixedSize(horizontal: true, vertical: true)
@@ -2910,12 +2914,14 @@ struct ContentView: View {
         }
     }
 
-    private func destinationPickerPopover() -> some View {
-        DestinationPickerPopover(
+    private func destinationPickerPresenter() -> DestinationPickerPresenter {
+        DestinationPickerPresenter(
+            isPresented: $showingDestinationPicker,
             destinations: destinationStore.destinations.map {
                 DestinationPickerItem(id: $0.id, name: $0.displayName)
             },
             activeID: destinationStore.activeDestinationId,
+            colorScheme: colorScheme,
             onChoose: chooseDestinationFromPicker,
             onAdd: addDestinationFromPicker,
             onSettings: openDestinationSettingsFromPicker,

@@ -14,6 +14,21 @@ enum DestinationPickerFilter {
     }
 }
 
+/// Where the picker hangs. It belongs under the chip, with its tail pointing up at it, and it may
+/// extend past the bottom of the window because a popover is its own window. Only when the visible
+/// screen leaves too little room below the chip does it flip above instead of opening off-screen.
+enum DestinationPickerPlacement {
+    /// Roughly the tallest the panel gets: search field, a full destination list, divider, actions.
+    static let requiredHeight: CGFloat = 320
+
+    static func edge(anchorOnScreen: CGRect, visibleScreen: CGRect) -> NSRectEdge {
+        // AppKit hangs the popover on the side of the rect that `preferredEdge` names, so `.maxY`
+        // is the edge that renders the panel below the chip with its tail pointing up at it.
+        let roomBelow = anchorOnScreen.minY - visibleScreen.minY
+        return roomBelow >= requiredHeight ? .maxY : .minY
+    }
+}
+
 /// Keyboard highlight for the picker's visible rows. The highlight is stored by identity so it
 /// survives a re-filter, and it clamps at both ends instead of wrapping.
 struct DestinationPickerSelection: Equatable {
@@ -213,6 +228,90 @@ struct DestinationPickerPopover: View {
     }
 }
 
+/// Hosts the picker in an `NSPopover` anchored to the chip. SwiftUI's popover picked its own edge and
+/// put the panel below the chip and outside the window; this takes that decision over: the positioning
+/// rect is the chip itself, the edge comes from `DestinationPickerPlacement`, and the popover's own tail
+/// then points at the chip.
+struct DestinationPickerPresenter: NSViewRepresentable {
+    @Binding var isPresented: Bool
+    let destinations: [DestinationPickerItem]
+    let activeID: UUID?
+    let colorScheme: ColorScheme
+    let onChoose: (UUID) -> Void
+    let onAdd: () -> Void
+    let onSettings: () -> Void
+    let onDismiss: () -> Void
+
+    func makeNSView(context: Context) -> Anchor {
+        let anchor = Anchor()
+        anchor.presenter = self
+        return anchor
+    }
+
+    func updateNSView(_ anchor: Anchor, context: Context) {
+        anchor.presenter = self
+        anchor.sync()
+    }
+
+    final class Anchor: NSView, NSPopoverDelegate {
+        var presenter: DestinationPickerPresenter?
+        private let popover = NSPopover()
+        private var isClosingFromPresenter = false
+
+        override var isFlipped: Bool { true }
+
+        func sync() {
+            guard let presenter else { return }
+            if presenter.isPresented, !popover.isShown {
+                show()
+            } else if !presenter.isPresented, popover.isShown {
+                isClosingFromPresenter = true
+                popover.performClose(nil)
+                isClosingFromPresenter = false
+            }
+        }
+
+        private func show() {
+            guard let presenter, let window else { return }
+
+            popover.behavior = .transient
+            popover.animates = false
+            popover.delegate = self
+            popover.appearance = NSAppearance(named: presenter.colorScheme == .dark ? .darkAqua : .aqua)
+            let controller = NSHostingController(
+                rootView: DestinationPickerPopover(
+                    destinations: presenter.destinations,
+                    activeID: presenter.activeID,
+                    onChoose: presenter.onChoose,
+                    onAdd: presenter.onAdd,
+                    onSettings: presenter.onSettings,
+                    onDismiss: presenter.onDismiss
+                )
+                .preferredColorScheme(presenter.colorScheme)
+            )
+            controller.sizingOptions = [.preferredContentSize]
+            popover.contentViewController = controller
+
+            let anchorOnScreen = window.convertToScreen(convert(bounds, to: nil))
+            let visibleScreen = window.screen?.visibleFrame ?? .zero
+            popover.show(
+                relativeTo: bounds,
+                of: self,
+                preferredEdge: DestinationPickerPlacement.edge(
+                    anchorOnScreen: anchorOnScreen,
+                    visibleScreen: visibleScreen
+                )
+            )
+        }
+
+        func popoverDidClose(_ notification: Notification) {
+            popover.contentViewController = nil
+            guard !isClosingFromPresenter else { return }
+            presenter?.onDismiss()
+        }
+    }
+}
+
 /// Search field for the picker. It owns first responder on open and routes the keys a
 /// result list needs (Up, Down, Return, Esc) to the popover instead of the field editor.
 struct DestinationSearchField: NSViewRepresentable {
@@ -253,14 +352,30 @@ struct DestinationSearchField: NSViewRepresentable {
     final class PickerTextField: NSTextField {
         var focusRequest: UUID?
         private var appliedFocusRequest: UUID?
+        private var keyWindowObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let keyWindowObserver, window == nil {
+                NotificationCenter.default.removeObserver(keyWindowObserver)
+                self.keyWindowObserver = nil
+            }
+            // The popover window is not key when its content first appears, and a field cannot take
+            // first responder from a window that is not key yet. Retry the focus request when it becomes key.
+            if keyWindowObserver == nil, let window {
+                keyWindowObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didBecomeKeyNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.applyFocusRequest()
+                }
+            }
             applyFocusRequest()
         }
 
         func applyFocusRequest() {
-            guard let request = focusRequest, request != appliedFocusRequest, window != nil else { return }
+            guard let request = focusRequest, request != appliedFocusRequest, let window else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.focusRequest == request, self.appliedFocusRequest != request,
                       let window = self.window, window.makeFirstResponder(self) else { return }
