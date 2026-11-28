@@ -323,6 +323,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     private static let taskPressScale: CGFloat = 0.9
 
     private var taskTrackingArea: NSTrackingArea?
+    private var scrollObserver: NSObjectProtocol?
     private var hoveredTaskCharacter: Int?
     private var pressedTaskCharacter: Int?
 
@@ -342,6 +343,48 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
             boxes.append(TaskBox(characterIndex: range.location, rect: box))
         }
         return boxes
+    }
+
+    /// Each task item's line, from the item's left edge to the end of its text, in text view coordinates.
+    func taskRowRects(in rect: NSRect) -> [(characterIndex: Int, rect: NSRect)] {
+        guard !showsMarkdownSource, let layout = layoutManager, let container = textContainer,
+              let storage = textStorage, storage.length > 0, rect.width > 0, rect.height > 0 else { return [] }
+        layout.ensureLayout(for: container)
+        let glyphRange = layout.glyphRange(
+            forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y),
+            in: container
+        )
+        let source = string as NSString
+        let characters = source.lineRange(
+            for: layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        )
+        var rows: [(characterIndex: Int, rect: NSRect)] = []
+        storage.enumerateAttribute(.markdownTask, in: characters) { value, range, _ in
+            guard value != nil else { return }
+            let paragraph = source.lineRange(for: NSRange(location: range.location, length: 0))
+            let glyphs = layout.glyphRange(forCharacterRange: paragraph, actualCharacterRange: nil)
+            layout.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, usedRect, _, _, _ in
+                let origin = self.textContainerOrigin
+                rows.append((range.location, NSRect(
+                    x: origin.x + lineRect.minX,
+                    y: origin.y + lineRect.minY,
+                    width: max(usedRect.maxX - lineRect.minX, 0),
+                    height: lineRect.height
+                )))
+            }
+        }
+        return rows
+    }
+
+    /// The task item whose line holds `point`, in text view coordinates.
+    func taskRow(at point: NSPoint) -> Int? {
+        let probe = NSRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)
+        return taskRowRects(in: probe).first { $0.rect.contains(point) }?.characterIndex
+    }
+
+    /// The cursor `point` deserves: a hand across a task item's line, otherwise the text I-beam.
+    func cursor(at point: NSPoint) -> NSCursor {
+        taskRow(at: point) == nil ? .iBeam : .pointingHand
     }
 
     /// The checkbox whose `[` sits at `characterIndex`, in text view coordinates.
@@ -366,10 +409,9 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     /// Starts a press on a checkbox and returns whether the point landed on one.
     @discardableResult
     func beginTaskPress(at point: NSPoint) -> Bool {
-        guard let box = taskBoxes(in: NSRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48))
-            .first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }) else { return false }
-        pressedTaskCharacter = box.characterIndex
-        setNeedsDisplay(box.rect.insetBy(dx: -3, dy: -3))
+        guard let character = taskRow(at: point) else { return false }
+        pressedTaskCharacter = character
+        if let box = taskBoxRect(at: character) { setNeedsDisplay(box.insetBy(dx: -3, dy: -3)) }
         return true
     }
 
@@ -377,9 +419,9 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     func endTaskPress(at point: NSPoint) {
         guard let pressed = pressedTaskCharacter else { return }
         pressedTaskCharacter = nil
-        guard let rect = taskBoxRect(at: pressed) else { return }
-        setNeedsDisplay(rect.insetBy(dx: -3, dy: -3))
-        if rect.insetBy(dx: -2, dy: -2).contains(point) { toggleTask(at: pressed) }
+        if let box = taskBoxRect(at: pressed) { setNeedsDisplay(box.insetBy(dx: -3, dy: -3)) }
+        guard taskRow(at: point) == pressed else { return }
+        toggleTask(at: pressed)
     }
 
     /// Flips the task item owning the checkbox at `characterIndex` between `[ ]` and `[x]`.
@@ -437,8 +479,8 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for box in taskBoxes(in: visibleRect) {
-            addCursorRect(box.rect, cursor: .pointingHand)
+        for row in taskRowRects(in: visibleRect) {
+            addCursorRect(row.rect, cursor: .pointingHand)
         }
     }
 
@@ -450,20 +492,36 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     }
 
     private func updateTaskHover(at point: NSPoint?) {
-        let hovered = point.flatMap { point in
-            taskBoxes(in: NSRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48))
-                .first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) })
-        }?.characterIndex
-        guard hovered != hoveredTaskCharacter else { return }
-        let previous = hoveredTaskCharacter
-        hoveredTaskCharacter = hovered
-        if hovered != nil {
-            NSCursor.pointingHand.set()
-        } else if let point, bounds.contains(point) {
-            NSCursor.iBeam.set()
+        let inside = point.map { bounds.contains($0) } ?? false
+        let hovered = inside ? point.flatMap { taskRow(at: $0) } : nil
+        if hovered != hoveredTaskCharacter {
+            let previous = hoveredTaskCharacter
+            hoveredTaskCharacter = hovered
+            for character in [previous, hovered].compactMap({ $0 }) {
+                if let box = taskBoxRect(at: character) { setNeedsDisplay(box.insetBy(dx: -3, dy: -3)) }
+            }
         }
-        for character in [previous, hovered].compactMap({ $0 }) {
-            if let rect = taskBoxRect(at: character) { setNeedsDisplay(rect.insetBy(dx: -3, dy: -3)) }
+        guard inside else { return }
+        if hovered == nil { NSCursor.iBeam.set() } else { NSCursor.pointingHand.set() }
+    }
+
+    private func pointerLocation() -> NSPoint? {
+        guard let window, window.isKeyWindow else { return nil }
+        let location = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return bounds.contains(location) ? location : nil
+    }
+
+    private func observeScrolling() {
+        if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
+        scrollObserver = nil
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        clipView.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.updateTaskHover(at: self.pointerLocation())
+            self.window?.invalidateCursorRects(for: self)
         }
     }
 
@@ -515,6 +573,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        observeScrolling()
         if let keyWindowObserver {
             NotificationCenter.default.removeObserver(keyWindowObserver)
         }
@@ -561,6 +620,9 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     deinit {
         if let keyWindowObserver {
             NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+        if let scrollObserver {
+            NotificationCenter.default.removeObserver(scrollObserver)
         }
     }
 }
@@ -970,6 +1032,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             EditorMarkdown.apply(to: storage, attributes: attributes, range: range, spans: projectedSpans,
                                  editingLines: editingLines, liveHeadingPrefix: headingPrefix, liveTaskPrefix: taskPrefix)
             textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
+            textView.window?.invalidateCursorRects(for: textView)
             textView.typingAttributes = attributes
         }
 
