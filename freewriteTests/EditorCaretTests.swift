@@ -19,15 +19,41 @@ struct EditorCaretTests {
         return (coordinator, textView, box)
     }
 
-    private func configure(_ coordinator: FreewriteTextEditor.Coordinator, _ textView: NSTextView, text: String, editorID: UUID) {
+    private func configure(_ coordinator: FreewriteTextEditor.Coordinator, _ textView: NSTextView, text: String,
+                           editorID: UUID, colorScheme: ColorScheme = .light, increasedContrast: Bool = false) {
         coordinator.configureTextView(
             textView,
             text: text,
             editorID: editorID,
             selectedFont: "Lato-Regular",
             lineSpacing: 4,
-            colorScheme: .light
+            colorScheme: colorScheme,
+            increasedContrast: increasedContrast
         )
+    }
+
+    @Test(arguments: [ColorScheme.light, .dark])
+    func caretRetainsContrastWithoutMatchingBodyInk(scheme: ColorScheme) throws {
+        let (coordinator, editor, _) = makeEditor()
+        let id = UUID()
+        let isLight = scheme == .light
+        for content in ["", "Hills and quiet mornings\n\n## Heading\n\n- [ ] A task"] {
+            configure(coordinator, editor, text: content, editorID: id, colorScheme: scheme)
+            let body = try #require(editor.typingAttributes[.foregroundColor] as? NSColor)
+            let caret = try #require(editor.insertionPointColor?.usingColorSpace(.sRGB))
+            #expect(caret.alphaComponent == 1)
+            let gray = caret.redComponent
+            let bodyGray = try #require(body.usingColorSpace(.sRGB)).redComponent
+            #expect(isLight ? gray > bodyGray : gray < bodyGray)
+            let luminance = pow((gray + 0.055) / 1.055, 2.4)
+            #expect((isLight ? 1.05 / (luminance + 0.05) : (luminance + 0.05) / 0.05) >= 5)
+
+            let selection = NSRange(location: (content as NSString).length, length: 0)
+            editor.setSelectedRange(selection)
+            configure(coordinator, editor, text: content, editorID: id, colorScheme: scheme, increasedContrast: true)
+            #expect(editor.insertionPointColor == body)
+            #expect(editor.selectedRange() == selection)
+        }
     }
 
     @Test func bodyUsesFixedSizeForLoadedTextAndTyping() {
