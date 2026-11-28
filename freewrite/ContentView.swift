@@ -665,6 +665,7 @@ private extension View {
 struct FreewriteTextEditor: NSViewRepresentable {
     static let bodyFontSize: CGFloat = 16
 
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Binding var text: String
     @Binding var isComposingText: Bool
     @Binding var scrollRequest: EditorScrollRequest?
@@ -736,6 +737,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             selectedFont: selectedFont,
             lineSpacing: lineSpacing,
             colorScheme: colorScheme,
+            increasedContrast: colorSchemeContrast == .increased,
             showsMarkdownSource: showsMarkdownSource
         )
         context.coordinator.startObservingBoundsChanges()
@@ -770,6 +772,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
                 selectedFont: selectedFont,
                 lineSpacing: lineSpacing,
                 colorScheme: colorScheme,
+                increasedContrast: colorSchemeContrast == .increased,
                 showsMarkdownSource: showsMarkdownSource
             )
         }
@@ -847,6 +850,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             selectedFont: String,
             lineSpacing: CGFloat,
             colorScheme: ColorScheme,
+            increasedContrast: Bool = false,
             showsMarkdownSource: Bool = false
         ) {
             let editorChanged = lastConfiguredEditorID != editorID
@@ -858,19 +862,25 @@ struct FreewriteTextEditor: NSViewRepresentable {
             if !editorChanged, isComposing(in: textView) || isWaitingForComposition { return }
             (textView as? FreewriteEditorTextView)?.showsMarkdownSource = showsMarkdownSource
 
+            let shade: CGFloat = colorScheme == .light ? 0.20 : 0.90
+            let textColor = NSColor(red: shade, green: shade, blue: shade, alpha: 1)
+            let caretShade: CGFloat = colorScheme == .light ? 0.36 : 0.70
+            let caretColor = increasedContrast ? textColor
+                : NSColor(srgbRed: caretShade, green: caretShade, blue: caretShade, alpha: 1)
+            if textView.insertionPointColor != caretColor {
+                textView.insertionPointColor = caretColor
+            }
+
             let nextAppearance = EditorAppearance(fontName: selectedFont, lineSpacing: lineSpacing, colorScheme: colorScheme, showsMarkdownSource: showsMarkdownSource)
             let appearanceChanged = appearance != nextAppearance
             if appearanceChanged {
                 appearance = nextAppearance
                 let fontSize = FreewriteTextEditor.bodyFontSize
                 let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
-                let shade: CGFloat = colorScheme == .light ? 0.20 : 0.90
-                let textColor = NSColor(red: shade, green: shade, blue: shade, alpha: 1)
                 let paragraphStyle = NSMutableParagraphStyle()
                 paragraphStyle.lineSpacing = max(lineSpacing, 0)
                 attributes = [.font: font, .foregroundColor: textColor, .paragraphStyle: paragraphStyle]
                 textView.defaultParagraphStyle = paragraphStyle
-                textView.insertionPointColor = textColor
             }
 
             if editorChanged || textView.string != text {
