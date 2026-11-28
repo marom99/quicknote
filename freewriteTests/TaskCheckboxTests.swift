@@ -89,31 +89,33 @@ struct TaskCheckboxTests {
         #expect(editor.selectedRange() == caret)
     }
 
-    @Test func theWholeItemLineIsTheTargetAndPlainLinesAreNot() throws {
+    @Test func onlyTheCheckboxIsTheTarget() throws {
         let (editor, coordinator, source) = makeEditor()
         let window = attach(editor)
         defer { window.contentView = nil }
         configure(coordinator, editor, text: note, id: UUID())
         editor.setSelectedRange(NSRange(location: 30, length: 0))
-        let row = try #require(editor.taskRowRects(in: editor.visibleRect).first { $0.characterIndex == 2 }).rect
+        let box = try #require(editor.taskBoxRect(at: 2))
         let paragraph = lineRect(at: 34, in: editor).offsetBy(dx: editor.textContainerOrigin.x,
                                                              dy: editor.textContainerOrigin.y)
 
-        #expect(editor.cursor(at: NSPoint(x: row.minX + 4, y: row.midY)) == .pointingHand)
-        #expect(editor.cursor(at: NSPoint(x: row.midX, y: row.midY)) == .pointingHand)
-        #expect(editor.cursor(at: NSPoint(x: row.maxX - 2, y: row.midY)) == .pointingHand)
+        #expect(editor.cursor(at: box.center) == .pointingHand)
+        #expect(editor.cursor(at: NSPoint(x: box.midX, y: box.minY - 1)) == .pointingHand)
+        #expect(editor.cursor(at: NSPoint(x: box.maxX + 6, y: box.midY)) == .iBeam)
+        #expect(editor.cursor(at: NSPoint(x: box.maxX + 40, y: box.midY)) == .iBeam)
         #expect(editor.cursor(at: NSPoint(x: paragraph.midX, y: paragraph.midY)) == .iBeam)
-        #expect(editor.cursor(at: NSPoint(x: row.maxX + 20, y: row.midY)) == .iBeam)
-        #expect(editor.taskRow(at: NSPoint(x: paragraph.midX, y: paragraph.midY)) == nil)
-        #expect(editor.taskRow(at: NSPoint(x: row.maxX + 20, y: row.midY)) == nil)
-        #expect(editor.taskRow(at: NSPoint(x: row.midX, y: row.midY)) == 2)
+        #expect(editor.taskBox(at: NSPoint(x: box.maxX + 40, y: box.midY)) == nil)
+        #expect(editor.taskBox(at: box.center) == 2)
 
         let caret = editor.selectedRange()
-        let midItem = NSPoint(x: row.midX, y: row.midY)
-        editor.mouseDown(with: try #require(mouse(.leftMouseDown, at: midItem, in: editor, window: window)))
-        editor.mouseUp(with: try #require(mouse(.leftMouseUp, at: midItem, in: editor, window: window)))
+        #expect(!editor.beginTaskPress(at: NSPoint(x: box.maxX + 12, y: box.midY)))
+        #expect(editor.string == note)
+
+        editor.mouseDown(with: try #require(mouse(.leftMouseDown, at: box.center, in: editor, window: window)))
+        editor.mouseUp(with: try #require(mouse(.leftMouseUp, at: box.center, in: editor, window: window)))
         #expect(source.value.hasPrefix("- [x] Buy milk"))
         #expect(editor.selectedRange() == caret)
+        #expect(window.firstResponder === editor)
     }
 
     @Test func cursorTargetsFollowScrollingAndLineHeightChanges() throws {
@@ -128,13 +130,12 @@ struct TaskCheckboxTests {
         configure(coordinator, editor, text: note + String(repeating: "A plain paragraph line.\n", count: 8),
                   id: UUID())
         editor.setSelectedRange(NSRange(location: 30, length: 0))
-        let row = try #require(editor.taskRowRects(in: editor.bounds).first { $0.characterIndex == 2 }).rect
-        let pointer = editor.convert(NSPoint(x: row.midX, y: row.midY), to: nil)
+        let box = try #require(editor.taskBoxRect(at: 2))
+        let pointer = editor.convert(box.center, to: nil)
 
         #expect(editor.cursor(at: editor.convert(pointer, from: nil)) == .pointingHand)
-        #expect(editor.cursor(at: NSPoint(x: row.midX, y: row.maxY + 60)) == .iBeam)
 
-        let lineHeight = row.height
+        let lineHeight = lineRect(at: 2, in: editor).height
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: lineHeight * 2))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         #expect(editor.visibleRect.minY == lineHeight * 2)
@@ -144,13 +145,34 @@ struct TaskCheckboxTests {
         scrollView.reflectScrolledClipView(scrollView.contentView)
         #expect(editor.cursor(at: editor.convert(pointer, from: nil)) == .pointingHand)
 
-        let before = try #require(editor.taskRowRects(in: editor.bounds).first { $0.characterIndex == 2 }).rect
+        let before = try #require(editor.taskBoxRect(at: 2))
         editor.insertText("# Heading\n\n", replacementRange: NSRange(location: 0, length: 0))
         #expect(source.value.hasPrefix("# Heading\n\n- [ ] Buy milk"))
-        let after = try #require(editor.taskRowRects(in: editor.bounds).first { $0.characterIndex == 13 }).rect
+        let after = try #require(editor.taskBoxRect(at: 13))
         #expect(after.minY > before.minY)
-        #expect(editor.cursor(at: NSPoint(x: after.midX, y: after.midY)) == .pointingHand)
-        #expect(editor.cursor(at: NSPoint(x: before.midX, y: before.midY)) == .iBeam)
+        #expect(editor.cursor(at: after.center) == .pointingHand)
+        #expect(editor.cursor(at: before.center) == .iBeam)
+    }
+
+    @Test func clickingTheItemTextPlacesTheCaretWithoutToggling() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: note, id: UUID())
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        let box = try #require(editor.taskBoxRect(at: 2))
+
+        click(editor, at: NSPoint(x: box.maxX + 3, y: box.midY), in: window)
+        #expect(editor.string == note)
+        #expect(editor.selectedRange().length == 0)
+        #expect(editor.selectedRange().location > 2, "the caret lands in the item text")
+
+        let inText = editor.selectedRange().location
+        click(editor, at: NSPoint(x: box.maxX + 40, y: box.midY), in: window)
+        #expect(editor.string == note)
+        #expect(editor.selectedRange().location >= inText)
+        #expect(editor.selectedRange().length == 0)
+        #expect(editor.taskBox(at: NSPoint(x: box.maxX + 40, y: box.midY)) == nil)
     }
 
     @Test func releasingOutsideTheBoxLeavesItUnchanged() throws {
@@ -222,12 +244,11 @@ struct TaskCheckboxTests {
         let hovered = try render(editor)
         #expect(hasAccentTint(in: hovered, inside: unchecked))
 
-        let row = try #require(editor.taskRowRects(in: editor.bounds).first { $0.characterIndex == 2 }).rect
-        let itemText = NSPoint(x: row.maxX - 6, y: row.midY)
+        let itemText = NSPoint(x: unchecked.maxX + 20, y: unchecked.midY)
         editor.mouseMoved(with: try #require(mouse(.mouseMoved, at: itemText, in: editor, window: window)))
-        #expect(editor.cursor(at: itemText) == .pointingHand)
-        #expect(hasAccentTint(in: try render(editor), inside: unchecked),
-                "hovering the item text keeps the box highlighted")
+        #expect(editor.cursor(at: itemText) == .iBeam)
+        #expect(!hasAccentTint(in: try render(editor), inside: unchecked),
+                "the item text is not a checkbox target")
 
         editor.mouseDown(with: try #require(mouse(.leftMouseDown, at: unchecked.center, in: editor, window: window)))
         let pressed = try render(editor)
@@ -357,6 +378,14 @@ struct TaskCheckboxTests {
         window.contentView = editor
         window.makeFirstResponder(editor)
         return window
+    }
+
+    /// Drives the native text click path: the release is queued so `NSTextView`'s tracking loop sees it.
+    private func click(_ editor: NSTextView, at point: NSPoint, in window: NSWindow) {
+        guard let down = mouse(.leftMouseDown, at: point, in: editor, window: window),
+              let up = mouse(.leftMouseUp, at: point, in: editor, window: window) else { return }
+        NSApp.postEvent(up, atStart: false)
+        editor.mouseDown(with: down)
     }
 
     /// A real `NSEvent` carrying `point` (text view coordinates) in window coordinates.

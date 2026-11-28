@@ -336,7 +336,10 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
             forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y),
             in: container
         )
-        let characterRange = layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let source = string as NSString
+        let characterRange = source.lineRange(
+            for: layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        )
         var boxes: [TaskBox] = []
         storage.enumerateAttribute(.markdownTask, in: characterRange) { value, range, _ in
             guard value != nil, let box = taskBoxRect(at: range.location) else { return }
@@ -345,46 +348,23 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         return boxes
     }
 
-    /// Each task item's line, from the item's left edge to the end of its text, in text view coordinates.
-    func taskRowRects(in rect: NSRect) -> [(characterIndex: Int, rect: NSRect)] {
-        guard !showsMarkdownSource, let layout = layoutManager, let container = textContainer,
-              let storage = textStorage, storage.length > 0, rect.width > 0, rect.height > 0 else { return [] }
-        layout.ensureLayout(for: container)
-        let glyphRange = layout.glyphRange(
-            forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y),
-            in: container
-        )
-        let source = string as NSString
-        let characters = source.lineRange(
-            for: layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-        )
-        var rows: [(characterIndex: Int, rect: NSRect)] = []
-        storage.enumerateAttribute(.markdownTask, in: characters) { value, range, _ in
-            guard value != nil else { return }
-            let paragraph = source.lineRange(for: NSRange(location: range.location, length: 0))
-            let glyphs = layout.glyphRange(forCharacterRange: paragraph, actualCharacterRange: nil)
-            layout.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, usedRect, _, _, _ in
-                let origin = self.textContainerOrigin
-                rows.append((range.location, NSRect(
-                    x: origin.x + lineRect.minX,
-                    y: origin.y + lineRect.minY,
-                    width: max(usedRect.maxX - lineRect.minX, 0),
-                    height: lineRect.height
-                )))
-            }
-        }
-        return rows
+    private static let taskHitPadding: CGFloat = 2
+
+    /// The area a click or the hand cursor works in: the ring plus a little air around it.
+    func taskHitRect(at characterIndex: Int) -> NSRect? {
+        taskBoxRect(at: characterIndex)?.insetBy(dx: -Self.taskHitPadding, dy: -Self.taskHitPadding)
     }
 
-    /// The task item whose line holds `point`, in text view coordinates.
-    func taskRow(at point: NSPoint) -> Int? {
+    /// The task item whose checkbox area holds `point`, in text view coordinates.
+    func taskBox(at point: NSPoint) -> Int? {
         let probe = NSRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)
-        return taskRowRects(in: probe).first { $0.rect.contains(point) }?.characterIndex
+        return taskBoxes(in: probe).first { $0.rect.insetBy(dx: -Self.taskHitPadding, dy: -Self.taskHitPadding)
+            .contains(point) }?.characterIndex
     }
 
-    /// The cursor `point` deserves: a hand across a task item's line, otherwise the text I-beam.
+    /// The cursor `point` deserves: a hand over a checkbox, otherwise the text I-beam.
     func cursor(at point: NSPoint) -> NSCursor {
-        taskRow(at: point) == nil ? .iBeam : .pointingHand
+        taskBox(at: point) == nil ? .iBeam : .pointingHand
     }
 
     /// The checkbox whose `[` sits at `characterIndex`, in text view coordinates.
@@ -409,7 +389,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     /// Starts a press on a checkbox and returns whether the point landed on one.
     @discardableResult
     func beginTaskPress(at point: NSPoint) -> Bool {
-        guard let character = taskRow(at: point) else { return false }
+        guard let character = taskBox(at: point) else { return false }
         pressedTaskCharacter = character
         if let box = taskBoxRect(at: character) { setNeedsDisplay(box.insetBy(dx: -3, dy: -3)) }
         return true
@@ -420,7 +400,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         guard let pressed = pressedTaskCharacter else { return }
         pressedTaskCharacter = nil
         if let box = taskBoxRect(at: pressed) { setNeedsDisplay(box.insetBy(dx: -3, dy: -3)) }
-        guard taskRow(at: point) == pressed else { return }
+        guard taskBox(at: point) == pressed else { return }
         toggleTask(at: pressed)
     }
 
@@ -479,8 +459,8 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for row in taskRowRects(in: visibleRect) {
-            addCursorRect(row.rect, cursor: .pointingHand)
+        for box in taskBoxes(in: visibleRect) {
+            addCursorRect(box.rect.insetBy(dx: -Self.taskHitPadding, dy: -Self.taskHitPadding), cursor: .pointingHand)
         }
     }
 
@@ -493,7 +473,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
 
     private func updateTaskHover(at point: NSPoint?) {
         let inside = point.map { bounds.contains($0) } ?? false
-        let hovered = inside ? point.flatMap { taskRow(at: $0) } : nil
+        let hovered = inside ? point.flatMap { taskBox(at: $0) } : nil
         if hovered != hoveredTaskCharacter {
             let previous = hoveredTaskCharacter
             hoveredTaskCharacter = hovered
