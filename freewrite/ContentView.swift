@@ -249,11 +249,21 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
                             Array(UnsafeBufferPointer(start: properties, count: glyphRange.length)))
             }
             modified?.glyphs[offset] = glyph
-            modified?.flags[offset] = hidden ? .null : []
+            modified?.flags[offset] = hidden
+                ? (attributes[.markdownCaretAnchor] != nil ? .controlCharacter : .null)
+                : []
         }
         guard let modified else { return 0 }
         layoutManager.setGlyphs(modified.glyphs, properties: modified.flags, characterIndexes: characterIndexes, font: font, forGlyphRange: glyphRange)
         return glyphRange.length
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, shouldUse action: NSLayoutManager.ControlCharacterAction,
+                       forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
+        guard layoutManager.textStorage?.attribute(.markdownCaretAnchor, at: charIndex, effectiveRange: nil) != nil else {
+            return action
+        }
+        return .zeroAdvancement
     }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {

@@ -64,11 +64,16 @@ struct EditorMarkdownTests {
             #expect(!characterIsHidden(at: 0, in: editor))
         }
         #expect(source.value == hashes)
+        let before = caretRect(in: editor)
         key(" ", code: 49, in: window)
+        let empty = caretRect(in: editor)
         #expect(source.value == hashes + " ")
         #expect(editor.selectedRange() == NSRange(location: level + 1, length: 0))
         for index in 0...level { #expect(characterIsHidden(at: index, in: editor)) }
         key("H", in: window)
+        let filled = caretRect(in: editor)
+        #expect(abs(empty.minY - before.minY) < 1)
+        #expect(abs(empty.height - filled.height) < 1)
         #expect(source.value == hashes + " H")
         #expect(isBold(try font(in: editor, at: level + 1)))
         #expect(try font(in: editor, at: level + 1).pointSize == [24, 22, 20, 19, 18, 17][level - 1])
@@ -83,6 +88,53 @@ struct EditorMarkdownTests {
         #expect(!characterIsHidden(at: 0, in: editor))
         #expect(!isBold(try font(in: editor, at: level + 1)))
         #expect(source.value == hashes + " Heading\n")
+    }
+
+    @Test(arguments: Array(1...6), [false, true])
+    func emptyLiveHeadingKeepsItsOwnLine(level: Int, betweenParagraphs: Bool) async throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        let id = UUID()
+        let scheme: ColorScheme = betweenParagraphs ? .dark : .light
+        let previous = betweenParagraphs ? "Previous paragraph\n" : "- Previous item"
+        let suffix = betweenParagraphs ? "\nFollowing paragraph" : ""
+        configure(coordinator, editor, text: previous + suffix, id: id, scheme: scheme)
+        editor.setSelectedRange(NSRange(location: previous.utf16.count, length: 0))
+        if !betweenParagraphs {
+            key("\r", code: 36, in: window)
+            #expect(source.value == previous + "\n- ")
+            key("\r", code: 36, in: window)
+            #expect(source.value == previous + "\n")
+        }
+        let start = editor.selectedRange().location
+        let hashes = String(repeating: "#", count: level)
+        for _ in 0..<level { key("#", in: window) }
+        let before = caretRect(in: editor)
+        let priorLine = lineRect(at: start - 1, in: editor)
+
+        key(" ", code: 49, in: window)
+        let endOfPrefix = NSRange(location: start + level + 1, length: 0)
+        let empty = caretRect(in: editor)
+        #expect(editor.selectedRange() == endOfPrefix)
+        #expect((start..<NSMaxRange(endOfPrefix)).allSatisfy { characterIsHidden(at: $0, in: editor) })
+        #expect(lineRect(at: start - 1, in: editor) == priorLine)
+        let ownLine = lineRect(at: start, in: editor)
+        #expect(ownLine.minY >= priorLine.maxY - 0.5)
+        #expect(abs(empty.minY - before.minY) < 1)
+        #expect(abs(empty.minX - editor.textContainerOrigin.x - (editor.textContainer?.lineFragmentPadding ?? 0)) < 1)
+
+        await settleSelection()
+        configure(coordinator, editor, text: source.value, id: id, scheme: scheme)
+        #expect(caretRect(in: editor) == empty)
+        key("H", in: window)
+        let filled = caretRect(in: editor)
+        #expect(editor.selectedRange() == NSRange(location: endOfPrefix.location + 1, length: 0))
+        #expect(source.value == previous + (betweenParagraphs ? "" : "\n") + hashes + " H" + suffix)
+        #expect(abs(filled.minY - empty.minY) < 1)
+        #expect(abs(filled.height - empty.height) < 1)
+        #expect(filled.minX > empty.minX)
+        #expect(try font(in: editor, at: endOfPrefix.location).pointSize == [24, 22, 20, 19, 18, 17][level - 1])
     }
 
     @Test(arguments: ["#tag ", "\\# ", "inline # ", "####### ", "    ## ", "```\n## "])
@@ -147,6 +199,27 @@ struct EditorMarkdownTests {
         #expect(Data(source.value.utf8) == Data(markdown.utf8))
     }
 
+    @Test(arguments: ["**Bold**", "*Emphasis*", "[Link](url)", "> Quote", "- [x] Task", "```swift", "***"])
+    func keyboardKeepsCaretOnItsLineAcrossMarkdownTransitions(markdown: String) async {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        let previous = "Previous paragraph\n\n"
+        configure(coordinator, editor, text: previous, id: UUID())
+        let start = previous.utf16.count
+        editor.setSelectedRange(NSRange(location: start, length: 0))
+        for character in markdown { key(String(character), in: window) }
+        let before = caretRect(in: editor)
+        #expect(editor.selectedRange() == NSRange(location: start + markdown.utf16.count, length: 0))
+        key("\r", code: 36, in: window)
+        #expect(source.value == previous + markdown + (markdown == "- [x] Task" ? "\n- [ ] " : "\n"))
+        #expect(caretRect(in: editor).minY > before.minY)
+        key("\u{f700}", code: 126, in: window)
+        await settleSelection()
+        #expect((start...start + markdown.utf16.count).contains(editor.selectedRange().location))
+        #expect(abs(caretRect(in: editor).minY - before.minY) < 1)
+    }
+
     @Test func keyboardAutoBulletSurvivesAutosaveBindingAndContinuesThenExits() throws {
         let (editor, coordinator, source) = makeEditor()
         let window = attach(editor, deterministicUndo: true)
@@ -164,6 +237,8 @@ struct EditorMarkdownTests {
         var expected: CGGlyph = 0
         #expect(CTFontGetGlyphsForCharacters(font, &bullet, &expected, 1))
         #expect(glyph == UInt32(expected))
+        let empty = caretRect(in: editor)
+        #expect(editor.selectedRange() == NSRange(location: 2, length: 0))
 
         configure(coordinator, editor, text: source.value, id: session)
         let undo = try #require(editor.undoManager)
@@ -177,12 +252,20 @@ struct EditorMarkdownTests {
         #expect(undo.canRedo)
         undo.redo()
         #expect(source.value == "- ")
+        #expect(caretRect(in: editor) == empty)
 
         key("A", in: window)
+        let filled = caretRect(in: editor)
+        #expect(abs(filled.minY - empty.minY) < 1)
+        #expect(filled.minX > empty.minX)
         key("\r", code: 36, in: window)
         #expect(source.value == "- A\n- ")
+        let continued = caretRect(in: editor)
+        #expect(continued.minY > filled.minY)
+        #expect(abs(continued.minX - empty.minX) < 1)
         key("\r", code: 36, in: window)
         #expect(source.value == "- A\n")
+        #expect(abs(caretRect(in: editor).minY - continued.minY) < 1)
         undo.undo()
         #expect(source.value == "- A\n- ")
     }
@@ -445,7 +528,21 @@ struct EditorMarkdownTests {
         guard let layout = editor.layoutManager, let container = editor.textContainer else { return false }
         layout.ensureLayout(for: container)
         let glyph = layout.glyphIndexForCharacter(at: index)
-        return layout.propertyForGlyph(at: glyph).contains(.null)
+        let property = layout.propertyForGlyph(at: glyph)
+        return property.contains(.null) || (property.contains(.controlCharacter)
+            && editor.textStorage?.attribute(.markdownHidden, at: index, effectiveRange: nil) != nil)
+    }
+
+    private func caretRect(in editor: NSTextView) -> NSRect {
+        let window = editor.window!
+        let screen = editor.firstRect(forCharacterRange: editor.selectedRange(), actualRange: nil)
+        return editor.convert(window.convertFromScreen(screen), from: nil)
+    }
+
+    private func lineRect(at index: Int, in editor: NSTextView) -> NSRect {
+        let layout = editor.layoutManager!
+        let glyph = layout.glyphIndexForCharacter(at: index)
+        return layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
     }
 
     private func settleSelection() async {
