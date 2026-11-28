@@ -490,7 +490,8 @@ struct EditorMarkdownTests {
         #expect(empty.minY >= before.minY - 0.5)
         #expect(abs(empty.minY - lineRect(at: start + 2, in: editor).minY) < 1)
         #expect(lineRect(at: start - 1, in: editor) == priorLine)
-        #expect(editor.textStorage?.attribute(.markdownGlyph, at: start + 2, effectiveRange: nil) as? UInt16 == 0x2610)
+        #expect(editor.textStorage?.attribute(.markdownTask, at: start + 2, effectiveRange: nil) as? Bool == false)
+        #expect(editor.textStorage?.attribute(.markdownGlyph, at: start + 2, effectiveRange: nil) == nil)
         #expect(editor.textStorage?.attribute(.markdownList, at: start, effectiveRange: nil) != nil)
         for index in [0, 1, 3, 4] { #expect(characterIsHidden(at: start + index, in: editor)) }
         #expect(!characterIsHidden(at: start + 2, in: editor))
@@ -498,10 +499,12 @@ struct EditorMarkdownTests {
         let container = try #require(editor.textContainer)
         layout.ensureLayout(for: container)
         let boxed = try font(in: editor, at: start + 2)
-        var unchecked: UInt16 = 0x2610
+        var space: UInt16 = 0x20
         var expected: CGGlyph = 0
-        #expect(CTFontGetGlyphsForCharacters(boxed, &unchecked, &expected, 1))
+        #expect(CTFontGetGlyphsForCharacters(boxed, &space, &expected, 1))
         #expect(layout.glyph(at: layout.glyphIndexForCharacter(at: start + 2)) == UInt32(expected))
+        let slotWidth = caretX(at: start + 5, in: editor) - caretX(at: start + 2, in: editor)
+        #expect(abs(slotWidth - EditorMarkdown.taskSlotWidth(forFontSize: boxed.pointSize)) < 1)
 
         for character in "Title" { key(String(character), in: window) }
         #expect(source.value == previous + "- [ ] Title")
@@ -529,7 +532,7 @@ struct EditorMarkdownTests {
         }
         #expect(source.value == "- [x] ")
         #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
-        #expect(editor.textStorage?.attribute(.markdownGlyph, at: 2, effectiveRange: nil) as? UInt16 == 0x2611)
+        #expect(editor.textStorage?.attribute(.markdownTask, at: 2, effectiveRange: nil) as? Bool == true)
         #expect(characterIsHidden(at: 0, in: editor))
         #expect(characterIsHidden(at: 3, in: editor))
         key("D", in: window)
@@ -548,7 +551,7 @@ struct EditorMarkdownTests {
         #expect(source.value == "- [ ] A\n- [ ] ")
         #expect(editor.selectedRange() == NSRange(location: 14, length: 0))
         #expect(editor.textStorage?.attribute(.markdownList, at: 8, effectiveRange: nil) != nil)
-        #expect(editor.textStorage?.attribute(.markdownGlyph, at: 10, effectiveRange: nil) as? UInt16 == 0x2610)
+        #expect(editor.textStorage?.attribute(.markdownTask, at: 10, effectiveRange: nil) as? Bool == false)
         #expect(characterIsHidden(at: 8, in: editor))
         key("\r", code: 36, in: window)
         #expect(source.value == "- [ ] A\n")
@@ -702,6 +705,13 @@ struct EditorMarkdownTests {
         let property = layout.propertyForGlyph(at: glyph)
         return property.contains(.null) || (property.contains(.controlCharacter)
             && editor.textStorage?.attribute(.markdownHidden, at: index, effectiveRange: nil) != nil)
+    }
+
+    private func caretX(at index: Int, in editor: NSTextView) -> CGFloat {
+        let saved = editor.selectedRange()
+        editor.setSelectedRange(NSRange(location: index, length: 0))
+        defer { editor.setSelectedRange(saved) }
+        return caretRect(in: editor).minX
     }
 
     private func caretRect(in editor: NSTextView) -> NSRect {

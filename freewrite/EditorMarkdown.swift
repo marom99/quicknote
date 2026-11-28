@@ -36,6 +36,37 @@ enum EditorMarkdown {
         }
     }
 
+    /// Width of the drawn checkbox, sized to the body text it sits beside.
+    static func taskBoxSize(forFontSize size: CGFloat) -> CGFloat {
+        (size * 0.84).rounded()
+    }
+
+    /// Width the checkbox reserves on its line, box plus the air before the item text.
+    static func taskSlotWidth(forFontSize size: CGFloat) -> CGFloat {
+        taskBoxSize(forFontSize: size) + 1.5
+    }
+
+    /// The space-or-`x` character inside `[ ]` at a task item's box location.
+    static func taskStateRange(in source: String, at location: Int) -> NSRange? {
+        let text = source as NSString
+        guard location >= 0, location + 2 < text.length,
+              text.character(at: location) == 91, text.character(at: location + 2) == 93 else { return nil }
+        let state = text.character(at: location + 1)
+        guard state == 32 || state == 120 || state == 88 else { return nil }
+        return NSRange(location: location + 1, length: 1)
+    }
+
+    /// The source with the task item owning the checkbox at `location` flipped between `[ ]` and `[x]`,
+    /// or nil when that location is not a rendered task box.
+    static func toggledTask(in source: String, at location: Int) -> String? {
+        guard let state = taskStateRange(in: source, at: location),
+              MarkdownSourceProjection.spans(in: source).contains(where: {
+                  ($0.style == .checkedTask || $0.style == .uncheckedTask) && $0.range.location == location
+              }) else { return nil }
+        let checked = (source as NSString).character(at: state.location) != 32
+        return (source as NSString).replacingCharacters(in: state, with: checked ? " " : "x")
+    }
+
     /// The task item prefix (`- [ ] ` or `- [x] `) at the start of the line holding `location`.
     static func taskPrefix(in source: String, at location: Int) -> NSRange? {
         let text = source as NSString
@@ -109,7 +140,12 @@ enum EditorMarkdown {
                 storage.addAttribute(.markdownHidden, value: true, range: span.range)
             case .listMarker:
                 storage.addAttribute(.markdownList, value: true, range: span.range)
-            case .bullet, .checkedTask, .uncheckedTask, .rule, .tableDivider, .quoteBar, .imagePlaceholder:
+            case .checkedTask, .uncheckedTask:
+                storage.addAttribute(.markdownTask, value: span.style == .checkedTask, range: span.range)
+                let advance = (" " as NSString).size(withAttributes: [.font: bodyFont]).width
+                storage.addAttribute(.font, value: bodyFont, range: span.range)
+                storage.addAttribute(.kern, value: taskSlotWidth(forFontSize: bodyFont.pointSize) - advance, range: span.range)
+            case .bullet, .rule, .tableDivider, .quoteBar, .imagePlaceholder:
                 guard let glyph = glyph(for: span.style) else { return }
                 storage.addAttribute(.markdownGlyph, value: glyph, range: span.range)
                 let symbolFont = NSFont(name: "Menlo", size: bodyFont.pointSize)
@@ -216,4 +252,5 @@ extension NSAttributedString.Key {
     static let markdownCaretAnchor = Self("QuickNoteMarkdownCaretAnchor")
     static let markdownGlyph = Self("QuickNoteMarkdownGlyph")
     static let markdownList = Self("QuickNoteMarkdownList")
+    static let markdownTask = Self("QuickNoteMarkdownTask")
 }
