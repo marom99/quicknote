@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct EditorMarkdownTests {
-    @Test func keyboardRendersBoldWithCaretOnLineAndNativeNavigation() throws {
+    @Test func keyboardRevealsInlineSourceAndKeepsNativeNavigationAndUndo() async throws {
         let (editor, coordinator, source) = makeEditor()
         let window = attach(editor, deterministicUndo: true)
         defer { window.contentView = nil }
@@ -16,27 +16,87 @@ struct EditorMarkdownTests {
         key("*", in: window)
         #expect(source.value == "**Test**")
         #expect(editor.selectedRange() == NSRange(location: 8, length: 0))
-        for index in [0, 1, 6, 7] { #expect(characterIsHidden(at: index, in: editor)) }
+        for index in [0, 1, 6, 7] { #expect(!characterIsHidden(at: index, in: editor)) }
+        #expect(!isBold(try font(in: editor, at: 2)))
+
+        key("\r", code: 36, in: window)
+        #expect(characterIsHidden(at: 0, in: editor))
         #expect(isBold(try font(in: editor, at: 2)))
+        key("\u{f702}", code: 123, in: window)
+        await settleSelection()
+        #expect(!characterIsHidden(at: 0, in: editor))
 
         key("\u{f702}", code: 123, in: window)
-        #expect(editor.selectedRange() == NSRange(location: 5, length: 0))
+        #expect(editor.selectedRange().location < 8)
         key("\u{f703}", code: 124, in: window)
-        #expect(editor.selectedRange().location >= 6)
         editor.setSelectedRange(NSRange(location: 8, length: 0))
         key("\u{7f}", code: 51, in: window)
-        #expect(source.value == "**Tes**")
+        #expect(source.value == "**Test*\n")
         let undo = try #require(editor.undoManager)
         undo.undo()
-        #expect(source.value == "**Test**")
+        #expect(source.value == "**Test**\n")
         undo.redo()
-        #expect(source.value == "**Tes**")
+        #expect(source.value == "**Test*\n")
 
         editor.setSelectedRange(NSRange(location: 0, length: 0))
         key("\u{f728}", code: 117, in: window)
-        #expect(source.value == "**es**")
+        #expect(source.value == "*Test*\n")
         undo.undo()
-        #expect(source.value == "**Tes**")
+        #expect(source.value == "**Test*\n")
+    }
+
+    @Test(arguments: [false, true])
+    func typedHeadingStaysSourceUntilReturnAndReappearsOnArrowUp(afterBullet: Bool) async throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        if afterBullet {
+            key("-", code: 27, in: window)
+            #expect(source.value == "- ")
+            #expect(editor.textStorage?.attribute(.markdownGlyph, at: 0, effectiveRange: nil) as? UInt16 == 0x2022)
+            key("\r", code: 36, in: window)
+            #expect(source.value == "")
+        }
+        for character in "# Heading" {
+            key(String(character), in: window)
+            #expect(!characterIsHidden(at: 0, in: editor))
+        }
+        #expect(source.value == "# Heading")
+        #expect(try font(in: editor, at: 2).pointSize == 16)
+        key("\r", code: 36, in: window)
+        #expect(source.value == "# Heading\n")
+        #expect(characterIsHidden(at: 0, in: editor))
+        #expect(try font(in: editor, at: 2).pointSize > 16)
+        key("\u{f700}", code: 126, in: window)
+        await settleSelection()
+        #expect(!characterIsHidden(at: 0, in: editor))
+        #expect(try font(in: editor, at: 2).pointSize == 16)
+        #expect(source.value == "# Heading\n")
+    }
+
+    @Test func lineTransitionsRevealLinkQuoteAndFenceSyntaxWithoutChangingSelection() async throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        let markdown = "Plain\n> [link](url)\n\n```swift\nlet x = 1\n```\n"
+        source.value = markdown
+        configure(coordinator, editor, text: markdown, id: UUID())
+        let original = markdown as NSString
+        let url = original.range(of: "url")
+        let fence = original.range(of: "```swift")
+        #expect(characterIsHidden(at: url.location, in: editor))
+        #expect(characterIsHidden(at: fence.location, in: editor))
+        editor.setSelectedRange(url)
+        await settleSelection()
+        #expect(editor.selectedRange() == url)
+        #expect(!characterIsHidden(at: url.location, in: editor))
+        #expect(characterIsHidden(at: fence.location, in: editor))
+        editor.setSelectedRange(NSRange(location: fence.location, length: 0))
+        await settleSelection()
+        #expect(characterIsHidden(at: url.location, in: editor))
+        #expect(!characterIsHidden(at: fence.location, in: editor))
+        #expect(Data(source.value.utf8) == Data(markdown.utf8))
     }
 
     @Test func keyboardAutoBulletSurvivesAutosaveBindingAndContinuesThenExits() throws {
@@ -135,21 +195,25 @@ struct EditorMarkdownTests {
         key("-", code: 27, in: window)
         key(" ", code: 49, in: window)
         #expect(source.value == "\\- ")
-        #expect(characterIsHidden(at: 0, in: editor))
+        #expect(!characterIsHidden(at: 0, in: editor))
         #expect(!characterIsHidden(at: 1, in: editor))
+        key("\r", code: 36, in: window)
+        #expect(characterIsHidden(at: 0, in: editor))
     }
 
     @Test func switchingToSourceRevealsSyntaxWithoutChangingSelectionOrBytes() {
         let (editor, coordinator, source) = makeEditor()
         let id = UUID()
-        source.value = "**📝** [link](https://example.com)"
+        source.value = "**📝** [link](https://example.com)\nPlain"
         configure(coordinator, editor, text: source.value, id: id)
-        editor.setSelectedRange(NSRange(location: 2, length: 2))
+        let selection = (source.value as NSString).range(of: "Plain")
+        editor.setSelectedRange(selection)
+        configure(coordinator, editor, text: source.value, id: id, scheme: .dark)
         #expect(characterIsHidden(at: 0, in: editor))
         coordinator.configureTextView(editor, text: source.value, editorID: id, selectedFont: "Lato-Regular",
                                       lineSpacing: 4, colorScheme: .light, showsMarkdownSource: true)
         #expect(!characterIsHidden(at: 0, in: editor))
-        #expect(editor.selectedRange() == NSRange(location: 2, length: 2))
+        #expect(editor.selectedRange() == selection)
         #expect(Data(source.value.utf8) == Data(editor.string.utf8))
         configure(coordinator, editor, text: source.value, id: id)
         #expect(characterIsHidden(at: 0, in: editor))
@@ -172,13 +236,13 @@ struct EditorMarkdownTests {
         editor.insertText("*", replacementRange: editor.selectedRange())
         #expect(Array(source.value.utf8) == Array("**📝 memo**".utf8))
         #expect(editor.selectedRange() == NSRange(location: end + 1, length: 0))
-        #expect(isBold(try font(in: editor, at: 5)))
+        #expect(!isBold(try font(in: editor, at: 5)))
 
         let selection = NSRange(location: 2, length: 2)
         editor.setSelectedRange(selection)
         configure(coordinator, editor, text: editor.string, id: id, scheme: .dark)
         #expect(editor.selectedRange() == selection)
-        #expect(isBold(try font(in: editor, at: 5)))
+        #expect(!isBold(try font(in: editor, at: 5)))
         #expect(editor.textStorage?.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor
             == NSColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1))
         #expect((editor.typingAttributes[.font] as? NSFont)?.pointSize == 16)
@@ -238,7 +302,8 @@ struct EditorMarkdownTests {
         }
         #expect(!editor.hasMarkedText())
         #expect(source.value == "**日本**")
-        #expect(isBold(try font(in: editor, at: 2)))
+        #expect(!isBold(try font(in: editor, at: 2)))
+        #expect(!characterIsHidden(at: 0, in: editor))
 
         editor.setMarkedText("語", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         source.value = "Another note"
@@ -251,7 +316,7 @@ struct EditorMarkdownTests {
         #expect(source.value == "Another note")
     }
 
-    @Test func changingFenceUpdatesFollowingLinesAndSplittingAHeadingClearsOldStyle() throws {
+    @Test func changingFenceUpdatesFollowingLinesAndSplittingAHeadingClearsOldStyle() async throws {
         let (editor, coordinator, source) = makeEditor()
         let initial = "# Heading\n\n```\n**line**\n```\n# Tail"
         configure(coordinator, editor, text: initial, id: UUID())
@@ -261,6 +326,9 @@ struct EditorMarkdownTests {
         editor.insertText("!", replacementRange: NSRange(location: start, length: 1))
         #expect(editor.textStorage?.attribute(.backgroundColor, at: fencedBody, effectiveRange: nil) == nil)
         #expect(isBold(try font(in: editor, at: fencedBody)))
+        editor.setSelectedRange(NSRange(location: fencedBody, length: 0))
+        await settleSelection()
+        #expect(!isBold(try font(in: editor, at: fencedBody)))
         let tail = (source.value as NSString).range(of: "Tail").location
         #expect(editor.textStorage?.attribute(.backgroundColor, at: tail, effectiveRange: nil) != nil)
 
@@ -330,6 +398,12 @@ struct EditorMarkdownTests {
         layout.ensureLayout(for: container)
         let glyph = layout.glyphIndexForCharacter(at: index)
         return layout.propertyForGlyph(at: glyph).contains(.null)
+    }
+
+    private func settleSelection() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 
     private func font(in editor: NSTextView, at index: Int) throws -> NSFont {

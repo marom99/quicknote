@@ -11,7 +11,8 @@ enum EditorMarkdown {
         let style: Style
     }
 
-    static func apply(to storage: NSTextStorage, attributes: [NSAttributedString.Key: Any], range: NSRange, rendered: Bool, provisionalBullet: Int? = nil) {
+    static func apply(to storage: NSTextStorage, attributes: [NSAttributedString.Key: Any], range: NSRange,
+                      spans: [Span], editingLines: NSRange?) {
         guard range.length > 0 else { return }
         let bodyFont = attributes[.font] as? NSFont ?? .systemFont(ofSize: 16)
         let ink = attributes[.foregroundColor] as? NSColor ?? .textColor
@@ -21,16 +22,31 @@ enum EditorMarkdown {
         storage.beginEditing()
         defer { storage.endEditing() }
         storage.setAttributes(attributes, range: range)
-        guard rendered else { return }
-        for span in displaySpans(in: storage.string, provisionalBullet: provisionalBullet)
-            where span.range.length > 0 && NSMaxRange(span.range) <= storage.length {
+        for span in spans where span.range.length > 0 && NSMaxRange(span.range) <= storage.length {
+            let target = NSIntersectionRange(span.range, range)
+            guard target.length > 0 else { continue }
+            let source = editingLines.map { NSIntersectionRange($0, target) }
+            let keepsBullet = span.style == .bullet && (storage.string as NSString).character(at: span.range.location) == 45
+            if let source, source.length > 0, span.style != .listMarker, !keepsBullet {
+                if target.location < source.location {
+                    apply(Span(range: NSRange(location: target.location, length: source.location - target.location), style: span.style))
+                }
+                if NSMaxRange(source) < NSMaxRange(target) {
+                    apply(Span(range: NSRange(location: NSMaxRange(source), length: NSMaxRange(target) - NSMaxRange(source)), style: span.style))
+                }
+            } else {
+                apply(Span(range: target, style: span.style))
+            }
+        }
+
+        func apply(_ span: Span) {
             switch span.style {
             case .marker:
                 storage.addAttribute(.markdownHidden, value: true, range: span.range)
             case .listMarker:
                 storage.addAttribute(.markdownList, value: true, range: span.range)
             case .bullet, .checkedTask, .uncheckedTask, .rule, .tableDivider, .quoteBar, .imagePlaceholder:
-                guard let glyph = glyph(for: span.style) else { continue }
+                guard let glyph = glyph(for: span.style) else { return }
                 storage.addAttribute(.markdownGlyph, value: glyph, range: span.range)
                 let symbolFont = NSFont(name: "Menlo", size: bodyFont.pointSize)
                 let fallback = NSFont.systemFont(ofSize: bodyFont.pointSize)
@@ -103,7 +119,7 @@ enum EditorMarkdown {
         }
     }
 
-    private static func displaySpans(in source: String, provisionalBullet: Int?) -> [Span] {
+    static func displaySpans(in source: String, provisionalBullet: Int?) -> [Span] {
         let spans = MarkdownSourceProjection.spans(in: source)
         guard let index = provisionalBullet else { return spans }
         let text = source as NSString

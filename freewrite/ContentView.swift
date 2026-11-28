@@ -52,6 +52,7 @@ struct EditorScrollRequest: Equatable {
 
 final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     var onMarkedTextChange: (() -> Void)?
+    var onEditingFocusChange: (() -> Void)?
     private(set) var isSettingMarkedText = false
     var showsMarkdownSource = false {
         didSet {
@@ -65,6 +66,18 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     func resetMarkdownKeyboardState() {
         automaticBulletEnd = nil
         provisionalBulletLocation = nil
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onEditingFocusChange?() }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onEditingFocusChange?() }
+        return resigned
     }
 
     override func keyDown(with event: NSEvent) {
@@ -504,6 +517,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
         private var appearance: EditorAppearance?
         private var attributes: [NSAttributedString.Key: Any] = [:]
         private var isWaitingForComposition = false
+        private var isUpdatingEditingLines = false
+        private var projectedSpans: [EditorMarkdown.Span] = []
+        private var editingLines: NSRange?
 
         private struct EditorAppearance: Equatable {
             let fontName: String
@@ -538,6 +554,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             let editorChanged = lastConfiguredEditorID != editorID
             if let editor = textView as? FreewriteEditorTextView, editor.onMarkedTextChange == nil {
                 editor.onMarkedTextChange = { [weak self] in self?.finishCompositionSoon() }
+                editor.onEditingFocusChange = { [weak self] in self?.updateEditingLinesSoon() }
                 editor.layoutManager?.delegate = editor
             }
             if !editorChanged, isComposing(in: textView) || isWaitingForComposition { return }
@@ -621,6 +638,41 @@ struct FreewriteTextEditor: NSViewRepresentable {
             publishScrollMetrics()
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            updateEditingLinesSoon()
+        }
+
+        private func updateEditingLinesSoon() {
+            guard !isUpdatingText, !isUpdatingEditingLines else { return }
+            isUpdatingEditingLines = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                defer { isUpdatingEditingLines = false }
+                guard let textView, !isWaitingForComposition, !isComposing(in: textView) else { return }
+                let next = activeEditingLines(in: textView)
+                guard next != editingLines else { return }
+                let previous = editingLines
+                editingLines = next
+                if let previous, let next, NSIntersectionRange(previous, next).length > 0 {
+                    style(textView, range: NSUnionRange(previous, next))
+                } else {
+                    if let previous { style(textView, range: previous) }
+                    if let next { style(textView, range: next) }
+                }
+                publishScrollMetrics()
+            }
+        }
+
+        private func activeEditingLines(in textView: NSTextView) -> NSRange? {
+            guard appearance?.showsMarkdownSource == false,
+                  textView.window == nil || textView.window?.firstResponder === textView else { return nil }
+            let selection = textView.selectedRange()
+            let source = textView.string as NSString
+            guard selection.location <= source.length, selection.length <= source.length - selection.location else { return nil }
+            let lines = source.lineRange(for: selection)
+            return lines.length > 0 ? lines : nil
+        }
+
         private func isComposing(in textView: NSTextView) -> Bool {
             textView.hasMarkedText() || (textView as? FreewriteEditorTextView)?.isSettingMarkedText == true
         }
@@ -643,13 +695,18 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
         private func restyle(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
-            let range = NSRange(location: 0, length: storage.length)
-            EditorMarkdown.apply(to: storage, attributes: attributes, range: range,
-                                 rendered: appearance?.showsMarkdownSource != true,
-                                 provisionalBullet: (textView as? FreewriteEditorTextView)?.provisionalBulletLocation)
-            if range.length > 0 {
-                textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
-            }
+            editingLines = activeEditingLines(in: textView)
+            projectedSpans = appearance?.showsMarkdownSource == true ? [] : EditorMarkdown.displaySpans(
+                in: storage.string, provisionalBullet: (textView as? FreewriteEditorTextView)?.provisionalBulletLocation
+            )
+            style(textView, range: NSRange(location: 0, length: storage.length))
+            textView.typingAttributes = attributes
+        }
+
+        private func style(_ textView: NSTextView, range: NSRange) {
+            guard let storage = textView.textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return }
+            EditorMarkdown.apply(to: storage, attributes: attributes, range: range, spans: projectedSpans, editingLines: editingLines)
+            textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
             textView.typingAttributes = attributes
         }
 
