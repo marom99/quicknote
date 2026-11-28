@@ -59,6 +59,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
             if showsMarkdownSource != oldValue {
                 automaticBulletEnd = nil
                 liveHeadingLineStart = nil
+                liveTaskLineStart = nil
             }
         }
     }
@@ -66,11 +67,13 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     private var automaticBulletEnd: Int?
     private(set) var provisionalBulletLocation: Int?
     var liveHeadingLineStart: Int?
+    var liveTaskLineStart: Int?
 
     func resetMarkdownKeyboardState() {
         automaticBulletEnd = nil
         provisionalBulletLocation = nil
         liveHeadingLineStart = nil
+        liveTaskLineStart = nil
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -147,6 +150,22 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
                 return
             }
         }
+        if keyboardCharacters == "]", string as? String == "]", !hasMarkedText(),
+           selectedRanges.count == 1 {
+            let target = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+            let source = self.string as NSString
+            var contentEnd = 0
+            source.getLineStart(nil, end: nil, contentsEnd: &contentEnd, for: NSRange(location: target.location, length: 0))
+            let line = source.lineRange(for: NSRange(location: target.location, length: 0))
+            let typed = NSRange(location: line.location, length: target.location - line.location)
+            if target.length == 0, NSMaxRange(typed) == contentEnd,
+               let task = EditorMarkdown.taskOpening(typed: source.substring(with: typed)),
+               !MarkdownSourceProjection.isLiteral(at: target.location, in: self.string) {
+                liveTaskLineStart = line.location
+                super.insertText(task, replacementRange: typed)
+                return
+            }
+        }
         super.insertText(string, replacementRange: replacementRange)
     }
 
@@ -175,6 +194,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
             breakUndoCoalescing()
             if body.trimmingCharacters(in: .whitespaces).isEmpty {
                 provisionalBulletLocation = nil
+                liveTaskLineStart = nil
                 super.insertText("", replacementRange: line)
             } else {
                 let marker = match.range(at: 1)
@@ -184,7 +204,9 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
                     ? source.substring(with: marker)
                     : "\((Int(source.substring(with: digits)) ?? 0) + 1)\(source.substring(with: match.range(at: 3)))"
                 let task = match.range(at: 4).location == NSNotFound ? "" : "[ ] "
-                super.insertText("\n" + indentation + next + " " + task, replacementRange: selectedRange())
+                let caret = selectedRange()
+                liveTaskLineStart = task.isEmpty ? nil : caret.location + 1
+                super.insertText("\n" + indentation + next + " " + task, replacementRange: caret)
             }
             return
         }
@@ -202,6 +224,7 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
         }
         if let (match, line) = listMatch(at: caret), caret == NSMaxRange(match.range), caret == NSMaxRange(line) {
             provisionalBulletLocation = nil
+            liveTaskLineStart = nil
             super.insertText("", replacementRange: line)
             return
         }
@@ -691,8 +714,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
                 defer { isUpdatingEditingLines = false }
                 guard let textView, !isWaitingForComposition, !isComposing(in: textView) else { return }
                 let next = activeEditingLines(in: textView)
-                let endedLiveHeading = clearLiveHeadingIfInactive(in: textView, editingLines: next)
-                guard next != editingLines || endedLiveHeading else { return }
+                let endedLivePrefix = clearLivePrefixIfInactive(in: textView, editingLines: next)
+                guard next != editingLines || endedLivePrefix else { return }
                 let previous = editingLines
                 editingLines = next
                 if let previous, let next, NSIntersectionRange(previous, next).length > 0 {
@@ -738,7 +761,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         private func restyle(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
             editingLines = activeEditingLines(in: textView)
-            clearLiveHeadingIfInactive(in: textView, editingLines: editingLines)
+            clearLivePrefixIfInactive(in: textView, editingLines: editingLines)
             projectedSpans = appearance?.showsMarkdownSource == true ? [] : EditorMarkdown.displaySpans(
                 in: storage.string, provisionalBullet: (textView as? FreewriteEditorTextView)?.provisionalBulletLocation
             )
@@ -748,21 +771,29 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
         private func style(_ textView: NSTextView, range: NSRange) {
             guard let storage = textView.textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return }
-            let headingPrefix = (textView as? FreewriteEditorTextView)?.liveHeadingLineStart.flatMap {
-                EditorMarkdown.atxPrefix(in: storage.string, at: $0)
-            }
+            let view = textView as? FreewriteEditorTextView
+            let headingPrefix = view?.liveHeadingLineStart.flatMap { EditorMarkdown.atxPrefix(in: storage.string, at: $0) }
+            let taskPrefix = view?.liveTaskLineStart.flatMap { EditorMarkdown.taskPrefix(in: storage.string, at: $0) }
             EditorMarkdown.apply(to: storage, attributes: attributes, range: range, spans: projectedSpans,
-                                 editingLines: editingLines, liveHeadingPrefix: headingPrefix)
+                                 editingLines: editingLines, liveHeadingPrefix: headingPrefix, liveTaskPrefix: taskPrefix)
             textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
             textView.typingAttributes = attributes
         }
 
         @discardableResult
-        private func clearLiveHeadingIfInactive(in textView: NSTextView, editingLines: NSRange?) -> Bool {
-            guard let view = textView as? FreewriteEditorTextView, let start = view.liveHeadingLineStart,
-                  editingLines?.location != start || textView.selectedRange().length > 0 else { return false }
-            view.liveHeadingLineStart = nil
-            return true
+        private func clearLivePrefixIfInactive(in textView: NSTextView, editingLines: NSRange?) -> Bool {
+            guard let view = textView as? FreewriteEditorTextView else { return false }
+            let activeLine = textView.selectedRange().length == 0 ? editingLines?.location : nil
+            var cleared = false
+            if let start = view.liveHeadingLineStart, start != activeLine {
+                view.liveHeadingLineStart = nil
+                cleared = true
+            }
+            if let start = view.liveTaskLineStart, start != activeLine {
+                view.liveTaskLineStart = nil
+                cleared = true
+            }
+            return cleared
         }
 
         func scrollTo(fraction: CGFloat) {
