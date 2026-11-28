@@ -13,6 +13,7 @@ enum EditorMarkdown {
 
     private static let atxOpener = try! NSRegularExpression(pattern: #"^ {0,3}#{1,6}$"#)
     private static let atxPrefix = try! NSRegularExpression(pattern: #"^ {0,3}(#{1,6}[ \t]+)"#)
+    private static let taskPrefixPattern = try! NSRegularExpression(pattern: #"^[ \t]*([-+*][ \t]+\[[ xX]\][ \t]+)"#)
 
     static func isATXOpener(in source: String, range: NSRange) -> Bool {
         atxOpener.firstMatch(in: source, range: range)?.range == range
@@ -26,8 +27,27 @@ enum EditorMarkdown {
         return atxPrefix.firstMatch(in: source, range: line)?.range(at: 1)
     }
 
+    /// The Markdown that replaces a line-start `[` or `[x` once its closing bracket arrives.
+    static func taskOpening(typed: String) -> String? {
+        switch typed {
+        case "[": "- [ ] "
+        case "[x", "[X": "- [x] "
+        default: nil
+        }
+    }
+
+    /// The task item prefix (`- [ ] ` or `- [x] `) at the start of the line holding `location`.
+    static func taskPrefix(in source: String, at location: Int) -> NSRange? {
+        let text = source as NSString
+        guard location < text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: location, length: 0))
+        guard line.location == location else { return nil }
+        return taskPrefixPattern.firstMatch(in: source, range: line)?.range(at: 1)
+    }
+
     static func apply(to storage: NSTextStorage, attributes: [NSAttributedString.Key: Any], range: NSRange,
-                      spans: [Span], editingLines: NSRange?, liveHeadingPrefix: NSRange?) {
+                      spans: [Span], editingLines: NSRange?, liveHeadingPrefix: NSRange?,
+                      liveTaskPrefix: NSRange? = nil) {
         guard range.length > 0 else { return }
         let bodyFont = attributes[.font] as? NSFont ?? .systemFont(ofSize: 16)
         let ink = attributes[.foregroundColor] as? NSColor ?? .textColor
@@ -35,6 +55,13 @@ enum EditorMarkdown {
         var faces: [FontFace: NSFont] = [:]
         let liveHeading = liveHeadingPrefix.map { spans.contains(Span(range: $0, style: .marker)) } == true
             ? liveHeadingPrefix : nil
+        let liveTask = liveTaskPrefix.flatMap { prefix -> NSRange? in
+            let boxed = spans.contains {
+                ($0.style == .uncheckedTask || $0.style == .checkedTask)
+                    && $0.range.location >= prefix.location && NSMaxRange($0.range) <= NSMaxRange(prefix)
+            }
+            return boxed ? prefix : nil
+        }
 
         storage.beginEditing()
         defer { storage.endEditing() }
@@ -54,7 +81,8 @@ enum EditorMarkdown {
             } else {
                 keepsHeading = false
             }
-            if let source, source.length > 0, span.style != .listMarker, !keepsBullet, !keepsHeading {
+            let keepsTask = liveTask.map { span.range.location >= $0.location && NSMaxRange(span.range) <= NSMaxRange($0) } ?? false
+            if let source, source.length > 0, span.style != .listMarker, !keepsBullet, !keepsHeading, !keepsTask {
                 if target.location < source.location {
                     apply(Span(range: NSRange(location: target.location, length: source.location - target.location), style: span.style))
                 }
@@ -70,6 +98,9 @@ enum EditorMarkdown {
             let level = (storage.string as NSString).substring(with: liveHeading).prefix { $0 == "#" }.count
             let anchor = NSRange(location: liveHeading.location, length: 1)
             storage.addAttributes([.markdownCaretAnchor: true, .font: headingFont(bodyFont, level: level)], range: anchor)
+        }
+        if let liveTask, NSLocationInRange(liveTask.location, range) {
+            storage.addAttribute(.markdownCaretAnchor, value: true, range: NSRange(location: liveTask.location, length: 1))
         }
 
         func apply(_ span: Span) {

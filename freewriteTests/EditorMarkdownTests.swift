@@ -469,6 +469,177 @@ struct EditorMarkdownTests {
         #expect(try font(in: editor, at: textStart + 1).pointSize == 16)
     }
 
+    @Test func bracketShortcutStartsAnUncheckedTaskWithAVisibleCheckbox() async throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        let previous = "Previous paragraph\n"
+        configure(coordinator, editor, text: previous, id: UUID())
+        let start = previous.utf16.count
+        editor.setSelectedRange(NSRange(location: start, length: 0))
+        let before = caretRect(in: editor)
+        let priorLine = lineRect(at: start - 1, in: editor)
+
+        key("[", code: 33, in: window)
+        #expect(source.value == previous + "[")
+        key("]", code: 30, in: window)
+        #expect(source.value == previous + "- [ ] ")
+        let endOfPrefix = NSRange(location: start + 6, length: 0)
+        #expect(editor.selectedRange() == endOfPrefix)
+        let empty = caretRect(in: editor)
+        #expect(empty.minY >= before.minY - 0.5)
+        #expect(abs(empty.minY - lineRect(at: start + 2, in: editor).minY) < 1)
+        #expect(lineRect(at: start - 1, in: editor) == priorLine)
+        #expect(editor.textStorage?.attribute(.markdownGlyph, at: start + 2, effectiveRange: nil) as? UInt16 == 0x2610)
+        #expect(editor.textStorage?.attribute(.markdownList, at: start, effectiveRange: nil) != nil)
+        for index in [0, 1, 3, 4] { #expect(characterIsHidden(at: start + index, in: editor)) }
+        #expect(!characterIsHidden(at: start + 2, in: editor))
+        let layout = try #require(editor.layoutManager)
+        let container = try #require(editor.textContainer)
+        layout.ensureLayout(for: container)
+        let boxed = try font(in: editor, at: start + 2)
+        var unchecked: UInt16 = 0x2610
+        var expected: CGGlyph = 0
+        #expect(CTFontGetGlyphsForCharacters(boxed, &unchecked, &expected, 1))
+        #expect(layout.glyph(at: layout.glyphIndexForCharacter(at: start + 2)) == UInt32(expected))
+
+        for character in "Title" { key(String(character), in: window) }
+        #expect(source.value == previous + "- [ ] Title")
+        let filled = caretRect(in: editor)
+        #expect(abs(filled.minY - empty.minY) < 1)
+        #expect(abs(filled.height - empty.height) < 1)
+        #expect(filled.minX > empty.minX - 0.5)
+        #expect(characterIsHidden(at: start, in: editor))
+        #expect(!isBold(try font(in: editor, at: start + 6)))
+
+        await settleSelection()
+        key("\u{f700}", code: 126, in: window)
+        await settleSelection()
+        #expect(source.value == previous + "- [ ] Title")
+    }
+
+    @Test(arguments: ["[x]", "[X]"])
+    func bracketShortcutStartsACheckedTask(typed: String) {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        for (offset, character) in typed.enumerated() {
+            key(String(character), code: offset == 1 ? 7 : 0, in: window)
+        }
+        #expect(source.value == "- [x] ")
+        #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
+        #expect(editor.textStorage?.attribute(.markdownGlyph, at: 2, effectiveRange: nil) as? UInt16 == 0x2611)
+        #expect(characterIsHidden(at: 0, in: editor))
+        #expect(characterIsHidden(at: 3, in: editor))
+        key("D", in: window)
+        #expect(source.value == "- [x] D")
+    }
+
+    @Test func bracketShortcutContinuesTaskListAndEmptyItemExitsIt() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor, deterministicUndo: true)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        key("[", code: 33, in: window)
+        key("]", code: 30, in: window)
+        key("A", in: window)
+        key("\r", code: 36, in: window)
+        #expect(source.value == "- [ ] A\n- [ ] ")
+        #expect(editor.selectedRange() == NSRange(location: 14, length: 0))
+        #expect(editor.textStorage?.attribute(.markdownList, at: 8, effectiveRange: nil) != nil)
+        #expect(editor.textStorage?.attribute(.markdownGlyph, at: 10, effectiveRange: nil) as? UInt16 == 0x2610)
+        #expect(characterIsHidden(at: 8, in: editor))
+        key("\r", code: 36, in: window)
+        #expect(source.value == "- [ ] A\n")
+        #expect(editor.selectedRange() == NSRange(location: 8, length: 0))
+        let undo = try #require(editor.undoManager)
+        undo.undo()
+        #expect(source.value == "- [ ] A\n- [ ] ")
+        key("\u{7f}", code: 51, in: window)
+        #expect(source.value == "- [ ] A\n")
+    }
+
+    @Test(arguments: ["A", "\\[", "[y", "```\n", "`[", "> "])
+    func bracketInputOutsideALineStartTodoStaysLiteral(prefix: String) {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        for character in prefix {
+            key(character == "\n" ? "\r" : String(character), code: character == "\n" ? 36 : 0, in: window)
+        }
+        key("[", code: 33, in: window)
+        key("]", code: 30, in: window)
+        #expect(source.value == prefix + "[]")
+        let bracket = (source.value as NSString).range(of: "[", options: .backwards).location
+        #expect(!characterIsHidden(at: bracket, in: editor))
+        key("X", in: window)
+        #expect(source.value == prefix + "[]X")
+    }
+
+    @Test func pastedAndComposedBracketsNeverBecomeTaskItems() {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("[]", forType: .string)
+        #expect(editor.readSelection(from: pasteboard, type: .string))
+        #expect(source.value == "[]")
+
+        configure(coordinator, editor, text: "", id: UUID())
+        editor.insertText("[", replacementRange: editor.selectedRange())
+        editor.insertText("]", replacementRange: editor.selectedRange())
+        #expect(source.value == "[]")
+        key("A", in: window)
+        #expect(source.value == "[]A")
+    }
+
+    @Test func bracketShortcutUndoesAndRedoesAsOneTaskItem() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor, deterministicUndo: true)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        key("[", code: 33, in: window)
+        key("]", code: 30, in: window)
+        #expect(source.value == "- [ ] ")
+        let undo = try #require(editor.undoManager)
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(source.value == "[")
+        undo.undo()
+        #expect(source.value == "")
+        undo.redo()
+        #expect(source.value == "[")
+        undo.redo()
+        #expect(source.value == "- [ ] ")
+        #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
+        key("A", in: window)
+        #expect(source.value == "- [ ] A")
+    }
+
+    @Test func taskOpenersAndLinePrefixesRecognizeOnlyLineStartTasks() {
+        #expect(EditorMarkdown.taskOpening(typed: "[") == "- [ ] ")
+        #expect(EditorMarkdown.taskOpening(typed: "[x") == "- [x] ")
+        #expect(EditorMarkdown.taskOpening(typed: "[X") == "- [x] ")
+        for typed in ["", "x", "[y", "[ ]", "A[", " [", "\\["] {
+            #expect(EditorMarkdown.taskOpening(typed: typed) == nil)
+        }
+        #expect(EditorMarkdown.taskPrefix(in: "- [ ] ", at: 0) == NSRange(location: 0, length: 6))
+        #expect(EditorMarkdown.taskPrefix(in: "- [x] A", at: 0) == NSRange(location: 0, length: 6))
+        #expect(EditorMarkdown.taskPrefix(in: "  - [ ] A", at: 0) == NSRange(location: 2, length: 6))
+        #expect(EditorMarkdown.taskPrefix(in: "- [ ] A", at: 3) == nil)
+        for line in ["- A", "- [y] A", "- [] A", "[ ] A", "> - [ ] A"] {
+            #expect(EditorMarkdown.taskPrefix(in: line, at: 0) == nil)
+        }
+        for source in ["- [ ] ", "- [x] "] {
+            let styles = MarkdownSourceProjection.spans(in: source).map { $0.style }
+            #expect(styles.contains(.uncheckedTask) || styles.contains(.checkedTask))
+        }
+    }
+
     private final class Source {
         var value = ""
     }
