@@ -4,43 +4,159 @@ import Testing
 @testable import freewrite
 
 @MainActor
+@Suite(.serialized)
 struct EditorMarkdownTests {
-    @Test func sourceRangesCoverSupportedSyntaxWithoutChangingUnicode() {
-        let source = "📝 intro\r\n## A **bold** _café_ ##\n> Quote\n- item\n2) ordered\n~~ignore~~ `x * y` [自分](https://example.com)"
-        let spans = EditorMarkdown.spans(in: source)
-        let text = source as NSString
-        func matches(_ style: EditorMarkdown.Style) -> [String] {
-            spans.filter { $0.style == style }.map { text.substring(with: $0.range) }
+    @Test func keyboardRendersBoldWithCaretOnLineAndNativeNavigation() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor, deterministicUndo: true)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: nil)
+        for character in "**Test*" { key(String(character), in: window) }
+        #expect(characterIsHidden(at: 0, in: editor) == false)
+        key("*", in: window)
+        #expect(source.value == "**Test**")
+        #expect(editor.selectedRange() == NSRange(location: 8, length: 0))
+        for index in [0, 1, 6, 7] { #expect(characterIsHidden(at: index, in: editor)) }
+        #expect(isBold(try font(in: editor, at: 2)))
+
+        key("\u{f702}", code: 123, in: window)
+        #expect(editor.selectedRange() == NSRange(location: 5, length: 0))
+        key("\u{f703}", code: 124, in: window)
+        #expect(editor.selectedRange().location >= 6)
+        editor.setSelectedRange(NSRange(location: 8, length: 0))
+        key("\u{7f}", code: 51, in: window)
+        #expect(source.value == "**Tes**")
+        let undo = try #require(editor.undoManager)
+        undo.undo()
+        #expect(source.value == "**Test**")
+        undo.redo()
+        #expect(source.value == "**Tes**")
+
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        key("\u{f728}", code: 117, in: window)
+        #expect(source.value == "**es**")
+        undo.undo()
+        #expect(source.value == "**Tes**")
+    }
+
+    @Test func keyboardAutoBulletSurvivesAutosaveBindingAndContinuesThenExits() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor, deterministicUndo: true)
+        defer { window.contentView = nil }
+        let session = UUID()
+        configure(coordinator, editor, text: "", id: session)
+        key("-", code: 27, in: window)
+        #expect(source.value == "- ")
+        let layout = try #require(editor.layoutManager)
+        let container = try #require(editor.textContainer)
+        layout.ensureLayout(for: container)
+        let glyph = layout.glyph(at: 0)
+        let font = try font(in: editor, at: 0)
+        var bullet: UInt16 = 0x2022
+        var expected: CGGlyph = 0
+        #expect(CTFontGetGlyphsForCharacters(font, &bullet, &expected, 1))
+        #expect(glyph == UInt32(expected))
+
+        configure(coordinator, editor, text: source.value, id: session)
+        let undo = try #require(editor.undoManager)
+        #expect(undo.canUndo)
+        key(" ", code: 49, in: window, groupUndo: false)
+        #expect(source.value == "- ")
+        editor.breakUndoCoalescing()
+        undo.undo()
+        #expect(source.value == "")
+        configure(coordinator, editor, text: source.value, id: session)
+        #expect(undo.canRedo)
+        undo.redo()
+        #expect(source.value == "- ")
+
+        key("A", in: window)
+        key("\r", code: 36, in: window)
+        #expect(source.value == "- A\n- ")
+        key("\r", code: 36, in: window)
+        #expect(source.value == "- A\n")
+        undo.undo()
+        #expect(source.value == "- A\n- ")
+    }
+
+    @Test func emptyTypedDashAfterParagraphAppearsAsBulletInsteadOfSetextHeading() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "Paragraph\n", id: UUID())
+        editor.setSelectedRange(NSRange(location: 10, length: 0))
+        key("-", code: 27, in: window)
+        #expect(source.value == "Paragraph\n- ")
+        #expect((try font(in: editor, at: 0)).pointSize == 16)
+        #expect(editor.textStorage?.attribute(.markdownGlyph, at: 10, effectiveRange: nil) as? UInt16 == 0x2022)
+        key("\r", code: 36, in: window)
+        #expect(source.value == "Paragraph\n")
+    }
+
+    @Test func keyboardContinuesOrderedNestedAndTaskItemsAndLeavesCodeLiteral() {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        let examples = [
+            ("3. One", "\r", "3. One\n4. "),
+            ("- Parent\n  - Child", "\r", "- Parent\n  - Child\n  - "),
+            ("- [x] Done", "\r", "- [x] Done\n- [ ] "),
+            ("```\n", "-", "```\n-"),
+            ("", "---", "---"),
+        ]
+        for (initial, typed, expected) in examples {
+            configure(coordinator, editor, text: initial, id: UUID())
+            editor.setSelectedRange(NSRange(location: initial.utf16.count, length: 0))
+            for character in typed {
+                key(String(character), code: character == "\r" ? 36 : 27, in: window)
+            }
+            #expect(source.value == expected)
         }
-        #expect(matches(.heading(2)) == [" A **bold** _café_"])
-        #expect(matches(.bold) == ["bold"])
-        #expect(matches(.italic) == ["café"])
-        #expect(matches(.quote) == ["Quote"])
-        #expect(matches(.listMarker) == ["-", "2)"])
-        #expect(matches(.code) == ["x * y"])
-        #expect(matches(.linkLabel) == ["自分"])
     }
 
-    @Test func escapesFenceLengthsAndCodePrecedence() {
-        let source = "\\*escaped* foo_bar_baz ***both***\n````swift\n**literal**\n```\n# still code\n````\n## Heading\n~~~\n[code](url)"
-        let spans = EditorMarkdown.spans(in: source)
-        let text = source as NSString
-        #expect(spans.filter { $0.style == .code }.map { text.substring(with: $0.range) } == [
-            "**literal**", "```", "# still code", "[code](url)"
-        ])
-        #expect(spans.filter { $0.style == .boldItalic }.map { text.substring(with: $0.range) } == ["both"])
-        #expect(!spans.contains { [.italic, .bold, .heading(1), .linkLabel].contains($0.style) })
-        #expect(spans.contains { $0.style == .heading(2) })
+    @Test func pastedDashInlineDashAndLiteralEscapeAreNotAutoExpanded() {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("-", forType: .string)
+        #expect(editor.readSelection(from: pasteboard, type: .string))
+        #expect(source.value == "-")
+
+        configure(coordinator, editor, text: "A", id: UUID())
+        editor.setSelectedRange(NSRange(location: 1, length: 0))
+        key("-", code: 27, in: window)
+        #expect(source.value == "A-")
+
+        configure(coordinator, editor, text: "", id: UUID())
+        key("\\", in: window)
+        key("-", code: 27, in: window)
+        key(" ", code: 49, in: window)
+        #expect(source.value == "\\- ")
+        #expect(characterIsHidden(at: 0, in: editor))
+        #expect(!characterIsHidden(at: 1, in: editor))
     }
 
-    @Test func unmatchedAndEscapedDelimitersRemainLiteral() {
-        let unmatched = String(repeating: "*a ", count: 3000)
-        #expect(EditorMarkdown.spans(in: unmatched).isEmpty)
-        let source = #"**strong and _italic_** **escaped closing\**"#
-        let spans = EditorMarkdown.spans(in: source)
-        let text = source as NSString
-        #expect(spans.filter { $0.style == .bold }.map { text.substring(with: $0.range) } == ["strong and _italic_"])
-        #expect(spans.filter { $0.style == .italic }.map { text.substring(with: $0.range) } == ["italic"])
+    @Test func switchingToSourceRevealsSyntaxWithoutChangingSelectionOrBytes() {
+        let (editor, coordinator, source) = makeEditor()
+        let id = UUID()
+        source.value = "**📝** [link](https://example.com)"
+        configure(coordinator, editor, text: source.value, id: id)
+        editor.setSelectedRange(NSRange(location: 2, length: 2))
+        #expect(characterIsHidden(at: 0, in: editor))
+        coordinator.configureTextView(editor, text: source.value, editorID: id, selectedFont: "Lato-Regular",
+                                      lineSpacing: 4, colorScheme: .light, showsMarkdownSource: true)
+        #expect(!characterIsHidden(at: 0, in: editor))
+        #expect(editor.selectedRange() == NSRange(location: 2, length: 2))
+        #expect(Data(source.value.utf8) == Data(editor.string.utf8))
+        configure(coordinator, editor, text: source.value, id: id)
+        #expect(characterIsHidden(at: 0, in: editor))
+    }
+
+    @Test func renderedWindowTitleOmitsInlineFormattingSyntax() {
+        #expect(EditorMarkdown.renderedTitle("**Test** and [a guide](https://example.com)") == "Test and a guide")
     }
 
     @Test func typingAndUndoKeepSourceSelectionAndTypingFont() throws {
@@ -99,6 +215,9 @@ struct EditorMarkdownTests {
         #expect(try Data(contentsOf: note) == expected)
         #expect(Data(editor.string.utf8) == expected)
         #expect(editor.textStorage?.attribute(.link, at: initial.utf16.count + 12, effectiveRange: nil) == nil)
+        editor.setSelectedRange(NSRange(location: 0, length: editor.string.utf16.count))
+        #expect(editor.writeSelection(to: pasteboard, types: editor.writablePasteboardTypes))
+        #expect(pasteboard.string(forType: .string).map { Data($0.utf8) } == expected)
     }
 
     @Test func markedTextSurvivesSwiftUIUpdatesAndStylesOnCommit() async throws {
@@ -169,8 +288,48 @@ struct EditorMarkdownTests {
         return (editor, coordinator, source)
     }
 
-    private func configure(_ coordinator: FreewriteTextEditor.Coordinator, _ editor: NSTextView, text: String, id: UUID, scheme: ColorScheme = .light) {
+    private func configure(_ coordinator: FreewriteTextEditor.Coordinator, _ editor: NSTextView, text: String, id: UUID?, scheme: ColorScheme = .light) {
         coordinator.configureTextView(editor, text: text, editorID: id, selectedFont: "Lato-Regular", lineSpacing: 4, colorScheme: scheme)
+    }
+
+    private final class KeyboardTestWindow: NSWindow {
+        let keyboardUndoManager = UndoManager()
+        override var undoManager: UndoManager? { keyboardUndoManager }
+    }
+
+    private func attach(_ editor: NSTextView, deterministicUndo: Bool = false) -> NSWindow {
+        let window: NSWindow
+        if deterministicUndo {
+            let test = KeyboardTestWindow(contentRect: editor.frame, styleMask: [.titled], backing: .buffered, defer: true)
+            test.keyboardUndoManager.groupsByEvent = false
+            window = test
+        } else {
+            window = NSWindow(contentRect: editor.frame, styleMask: [.titled], backing: .buffered, defer: true)
+        }
+        window.contentView = editor
+        window.makeFirstResponder(editor)
+        return window
+    }
+
+    private func key(_ characters: String, code: UInt16 = 0, in window: NSWindow, groupUndo: Bool = true) {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                     windowNumber: window.windowNumber, context: nil, characters: characters,
+                                     charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)
+        guard let event else { return }
+        if groupUndo, let undo = (window as? KeyboardTestWindow)?.keyboardUndoManager {
+            undo.beginUndoGrouping()
+            defer { undo.endUndoGrouping() }
+            window.sendEvent(event)
+        } else {
+            window.sendEvent(event)
+        }
+    }
+
+    private func characterIsHidden(at index: Int, in editor: NSTextView) -> Bool {
+        guard let layout = editor.layoutManager, let container = editor.textContainer else { return false }
+        layout.ensureLayout(for: container)
+        let glyph = layout.glyphIndexForCharacter(at: index)
+        return layout.propertyForGlyph(at: glyph).contains(.null)
     }
 
     private func font(in editor: NSTextView, at index: Int) throws -> NSFont {

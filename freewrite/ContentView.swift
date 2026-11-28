@@ -50,14 +50,182 @@ struct EditorScrollRequest: Equatable {
     let fraction: CGFloat
 }
 
-final class FreewriteEditorTextView: NSTextView {
+final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     var onMarkedTextChange: (() -> Void)?
     private(set) var isSettingMarkedText = false
+    var showsMarkdownSource = false {
+        didSet {
+            if showsMarkdownSource != oldValue { automaticBulletEnd = nil }
+        }
+    }
+    private var keyboardCharacters: String?
+    private var automaticBulletEnd: Int?
+    private(set) var provisionalBulletLocation: Int?
+
+    func resetMarkdownKeyboardState() {
+        automaticBulletEnd = nil
+        provisionalBulletLocation = nil
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let before = automaticBulletEnd
+        automaticBulletEnd = nil
+        let keyboardEdit = !showsMarkdownSource && !hasMarkedText()
+            && event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+        if keyboardEdit {
+            keyboardCharacters = event.characters
+            if let before, before >= 2, before <= string.utf16.count,
+               selectedRange() == NSRange(location: before, length: 0) {
+                let prefix = NSRange(location: before - 2, length: 2)
+                if (string as NSString).substring(with: prefix) == "- " {
+                    if event.characters == " " {
+                        keyboardCharacters = nil
+                        return
+                    }
+                    if event.characters == "-" {
+                        keyboardCharacters = nil
+                        super.insertText("--", replacementRange: prefix)
+                        return
+                    }
+                }
+            }
+        }
+        defer { keyboardCharacters = nil }
+        super.keyDown(with: event)
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        if keyboardCharacters == "-", string as? String == "-", !hasMarkedText(),
+           selectedRanges.count == 1 {
+            let target = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+            let source = self.string as NSString
+            let line = source.lineRange(for: NSRange(location: target.location, length: 0))
+            if target.length == 0, target.location == line.location,
+               (line.length == 0 || [UInt16(10), 13, 0x2028, 0x2029].contains(source.character(at: line.location))),
+               !MarkdownSourceProjection.isLiteral(at: target.location, in: self.string) {
+                breakUndoCoalescing()
+                provisionalBulletLocation = target.location
+                super.insertText("- ", replacementRange: target)
+                automaticBulletEnd = NSMaxRange(target) + 2
+                return
+            }
+        }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+
+    private static let listPrefix = try! NSRegularExpression(pattern: #"^[ \t]*([-+*]|([0-9]{1,9})([.)]))[ \t]+(?:\[([ xX])\][ \t]+)?"#)
+
+    private func listMatch(at caret: Int) -> (NSTextCheckingResult, NSRange)? {
+        guard !showsMarkdownSource, !hasMarkedText(), selectedRanges.count == 1, selectedRange().length == 0,
+              let storage = textStorage else { return nil }
+        var start = 0
+        var end = 0
+        let source = string as NSString
+        source.getLineStart(&start, end: nil, contentsEnd: &end, for: NSRange(location: caret, length: 0))
+        let line = NSRange(location: start, length: end - start)
+        guard let match = Self.listPrefix.firstMatch(in: string, range: line),
+              caret >= NSMaxRange(match.range),
+              storage.attribute(.markdownList, at: match.range(at: 1).location, effectiveRange: nil) != nil else { return nil }
+        return (match, line)
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        let caret = selectedRange().location
+        if let (match, line) = listMatch(at: caret) {
+            let source = string as NSString
+            let start = NSMaxRange(match.range)
+            let body = source.substring(with: NSRange(location: start, length: NSMaxRange(line) - start))
+            breakUndoCoalescing()
+            if body.trimmingCharacters(in: .whitespaces).isEmpty {
+                provisionalBulletLocation = nil
+                super.insertText("", replacementRange: line)
+            } else {
+                let marker = match.range(at: 1)
+                let indentation = source.substring(with: NSRange(location: line.location, length: marker.location - line.location))
+                let digits = match.range(at: 2)
+                let next = digits.location == NSNotFound
+                    ? source.substring(with: marker)
+                    : "\((Int(source.substring(with: digits)) ?? 0) + 1)\(source.substring(with: match.range(at: 3)))"
+                let task = match.range(at: 4).location == NSNotFound ? "" : "[ ] "
+                super.insertText("\n" + indentation + next + " " + task, replacementRange: selectedRange())
+            }
+            return
+        }
+        super.insertNewline(sender)
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        let caret = selectedRange().location
+        if let (match, line) = listMatch(at: caret), caret == NSMaxRange(match.range), caret == NSMaxRange(line) {
+            provisionalBulletLocation = nil
+            super.insertText("", replacementRange: line)
+            return
+        }
+        if deleteAcrossHidden(backward: true) { return }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        if deleteAcrossHidden(backward: false) { return }
+        super.deleteForward(sender)
+    }
+
+    private func deleteAcrossHidden(backward: Bool) -> Bool {
+        guard isEditable, !showsMarkdownSource, !hasMarkedText(), selectedRanges.count == 1, let storage = textStorage else { return false }
+        let selection = selectedRange()
+        guard selection.length == 0 else { return false }
+        let caret = selection.location
+        var index = backward ? caret - 1 : caret
+        let first = index
+        while index >= 0, index < storage.length,
+              storage.attribute(.markdownHidden, at: index, effectiveRange: nil) != nil {
+            index += backward ? -1 : 1
+        }
+        guard index != first, index >= 0, index < storage.length else { return false }
+        let deletion = (string as NSString).rangeOfComposedCharacterSequence(at: index)
+        breakUndoCoalescing()
+        super.insertText("", replacementRange: deletion)
+        setSelectedRange(NSRange(location: backward ? caret - deletion.length : caret, length: 0))
+        return true
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
+                       properties: UnsafePointer<NSLayoutManager.GlyphProperty>, characterIndexes: UnsafePointer<Int>,
+                       font: NSFont, forGlyphRange glyphRange: NSRange) -> Int {
+        guard let storage = layoutManager.textStorage else { return 0 }
+        guard !showsMarkdownSource else { return 0 }
+        var modified: (glyphs: [CGGlyph], flags: [NSLayoutManager.GlyphProperty])?
+        let marked = markedRange()
+        for offset in 0..<glyphRange.length {
+            let index = characterIndexes[offset]
+            if NSLocationInRange(index, marked) { continue }
+            let attributes = storage.attributes(at: index, effectiveRange: nil)
+            let hidden = attributes[.markdownHidden] != nil
+            var glyph = glyphs[offset]
+            if !hidden {
+                guard var character = attributes[.markdownGlyph] as? UInt16,
+                      CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { continue }
+            }
+            if modified == nil {
+                modified = (Array(UnsafeBufferPointer(start: glyphs, count: glyphRange.length)),
+                            Array(UnsafeBufferPointer(start: properties, count: glyphRange.length)))
+            }
+            modified?.glyphs[offset] = glyph
+            modified?.flags[offset] = hidden ? .null : []
+        }
+        guard let modified else { return 0 }
+        layoutManager.setGlyphs(modified.glyphs, properties: modified.flags, characterIndexes: characterIndexes, font: font, forGlyphRange: glyphRange)
+        return glyphRange.length
+    }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         isSettingMarkedText = true
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
         isSettingMarkedText = false
+        let marked = markedRange()
+        if marked.location != NSNotFound, marked.length > 0 {
+            layoutManager?.invalidateGlyphs(forCharacterRange: marked, changeInLength: 0, actualCharacterRange: nil)
+        }
         onMarkedTextChange?()
     }
 
@@ -196,6 +364,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     let focusRequest: UUID
     @Binding var caretEndRequest: UUID?
     let selectedFont: String
+    let showsMarkdownSource: Bool
     let lineSpacing: CGFloat
     let colorScheme: ColorScheme
     let editorInset: CGFloat
@@ -227,6 +396,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
         textView.setAccessibilityIdentifier("mainEditor")
         textView.drawsBackground = false
         textView.isRichText = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
@@ -253,7 +424,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
             editorID: editorID,
             selectedFont: selectedFont,
             lineSpacing: lineSpacing,
-            colorScheme: colorScheme
+            colorScheme: colorScheme,
+            showsMarkdownSource: showsMarkdownSource
         )
         context.coordinator.startObservingBoundsChanges()
         context.coordinator.publishScrollMetrics()
@@ -286,7 +458,8 @@ struct FreewriteTextEditor: NSViewRepresentable {
                 editorID: editorID,
                 selectedFont: selectedFont,
                 lineSpacing: lineSpacing,
-                colorScheme: colorScheme
+                colorScheme: colorScheme,
+                showsMarkdownSource: showsMarkdownSource
             )
         }
 
@@ -322,7 +495,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
         coordinator.stopObservingBoundsChanges()
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding private var text: String
         @Binding private var isComposingText: Bool
         private let onScrollMetricsChange: (EditorScrollMetrics) -> Void
@@ -331,14 +504,12 @@ struct FreewriteTextEditor: NSViewRepresentable {
         private var appearance: EditorAppearance?
         private var attributes: [NSAttributedString.Key: Any] = [:]
         private var isWaitingForComposition = false
-        private var styledSource = ""
-        private var pendingEdit: EditorMarkdown.Edit?
-        private var hasMultiplePendingEdits = false
 
         private struct EditorAppearance: Equatable {
             let fontName: String
             let lineSpacing: CGFloat
             let colorScheme: ColorScheme
+            let showsMarkdownSource: Bool
         }
 
         weak var scrollView: NSScrollView?
@@ -361,16 +532,18 @@ struct FreewriteTextEditor: NSViewRepresentable {
             editorID: UUID?,
             selectedFont: String,
             lineSpacing: CGFloat,
-            colorScheme: ColorScheme
+            colorScheme: ColorScheme,
+            showsMarkdownSource: Bool = false
         ) {
             let editorChanged = lastConfiguredEditorID != editorID
             if let editor = textView as? FreewriteEditorTextView, editor.onMarkedTextChange == nil {
                 editor.onMarkedTextChange = { [weak self] in self?.finishCompositionSoon() }
+                editor.layoutManager?.delegate = editor
             }
-            if appearance == nil { textView.textStorage?.delegate = self }
             if !editorChanged, isComposing(in: textView) || isWaitingForComposition { return }
+            (textView as? FreewriteEditorTextView)?.showsMarkdownSource = showsMarkdownSource
 
-            let nextAppearance = EditorAppearance(fontName: selectedFont, lineSpacing: lineSpacing, colorScheme: colorScheme)
+            let nextAppearance = EditorAppearance(fontName: selectedFont, lineSpacing: lineSpacing, colorScheme: colorScheme, showsMarkdownSource: showsMarkdownSource)
             let appearanceChanged = appearance != nextAppearance
             if appearanceChanged {
                 appearance = nextAppearance
@@ -388,6 +561,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
             if editorChanged || textView.string != text {
                 isWaitingForComposition = false
                 isUpdatingText = true
+                (textView as? FreewriteEditorTextView)?.resetMarkdownKeyboardState()
                 if textView.hasMarkedText() {
                     textView.inputContext?.discardMarkedText()
                     if textView.hasMarkedText() { textView.unmarkText() }
@@ -396,13 +570,13 @@ struct FreewriteTextEditor: NSViewRepresentable {
                 textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
                 textView.undoManager?.removeAllActions()
                 textView.selectedRanges = selectedRanges
-                restyle(textView, force: true)
+                restyle(textView)
                 isUpdatingText = false
-                lastConfiguredEditorID = editorID
                 if isComposingText { finishCompositionSoon() }
             } else if appearanceChanged {
-                restyle(textView, force: true)
+                restyle(textView)
             }
+            lastConfiguredEditorID = editorID
         }
 
         @discardableResult
@@ -447,12 +621,6 @@ struct FreewriteTextEditor: NSViewRepresentable {
             publishScrollMetrics()
         }
 
-        func textStorage(_ textStorage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
-            guard !isUpdatingText, editedMask.contains(.editedCharacters) else { return }
-            if pendingEdit != nil { hasMultiplePendingEdits = true }
-            pendingEdit = EditorMarkdown.Edit(range: editedRange, changeInLength: delta)
-        }
-
         private func isComposing(in textView: NSTextView) -> Bool {
             textView.hasMarkedText() || (textView as? FreewriteEditorTextView)?.isSettingMarkedText == true
         }
@@ -473,19 +641,15 @@ struct FreewriteTextEditor: NSViewRepresentable {
             }
         }
 
-        private func restyle(_ textView: NSTextView, force: Bool = false) {
+        private func restyle(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
-            let source = storage.string
-            let range: NSRange
-            if !force, !hasMultiplePendingEdits, let pendingEdit {
-                range = EditorMarkdown.invalidatedRange(in: source, replacing: styledSource, edit: pendingEdit)
-            } else {
-                range = NSRange(location: 0, length: storage.length)
+            let range = NSRange(location: 0, length: storage.length)
+            EditorMarkdown.apply(to: storage, attributes: attributes, range: range,
+                                 rendered: appearance?.showsMarkdownSource != true,
+                                 provisionalBullet: (textView as? FreewriteEditorTextView)?.provisionalBulletLocation)
+            if range.length > 0 {
+                textView.layoutManager?.invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
             }
-            EditorMarkdown.apply(to: storage, attributes: attributes, range: range)
-            styledSource = source
-            pendingEdit = nil
-            hasMultiplePendingEdits = false
             textView.typingAttributes = attributes
         }
 
@@ -594,6 +758,8 @@ struct ContentView: View {
     @State private var entries: [HumanEntry] = []
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
     @State private var isComposingEditorText = false
+    @State private var showsMarkdownSource = false
+    @State private var captureEditorSessionID = UUID()
     
     private let selectedFont: String = "Lato-Regular"
     @State private var bottomNavOpacity: Double = 1.0
@@ -864,6 +1030,7 @@ struct ContentView: View {
     }
 
     private func beginFreshCaptureSession(clearText: Bool) {
+        captureEditorSessionID = UUID()
         liveCaptureDraftRegistration = nil
         inProgressCaptureFilename = nil
         captureStartedAt = nil
@@ -1629,7 +1796,8 @@ struct ContentView: View {
         }
 
         let firstLine = trimmedText.components(separatedBy: .newlines).first ?? trimmedText
-        let words = firstLine
+        let titleLine = showsMarkdownSource ? firstLine : EditorMarkdown.renderedTitle(firstLine)
+        let words = titleLine
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
         if words.isEmpty {
@@ -1674,11 +1842,13 @@ struct ContentView: View {
                         isComposingText: $isComposingEditorText,
                         scrollRequest: $editorScrollRequest,
                         selectionFocusRequest: historySelectionFocusRequest,
-                        editorID: selectedEntryId,
+                        editorID: isCapturePerSessionMode && (inProgressCaptureFilename != nil || selectedEntryId == nil)
+                            ? captureEditorSessionID : selectedEntryId,
                         allowsAutomaticFocus: !showingDestinationSettings && !showingSidebar,
                         focusRequest: editorFocusRequest,
                         caretEndRequest: $editorCaretEndRequest,
                         selectedFont: selectedFont,
+                        showsMarkdownSource: showsMarkdownSource,
                         lineSpacing: lineHeight,
                         colorScheme: colorScheme,
                         editorInset: editorInset,
@@ -2011,7 +2181,9 @@ struct ContentView: View {
                 }
             },
             searchNotes: searchNotes,
-            openDestinationSettings: openDestinationSettings
+            openDestinationSettings: openDestinationSettings,
+            markdownSourceShown: showsMarkdownSource,
+            toggleMarkdownSource: currentVideoURL == nil ? { showsMarkdownSource.toggle() } : nil
         ))
         .background(WindowTitleAccessor(
             title: currentEntryTitle,

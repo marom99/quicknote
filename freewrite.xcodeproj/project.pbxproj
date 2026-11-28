@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		2800F7412DA1CEA0008FE5F9 /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = 2800F7402DA1CE9A008FE5F9 /* .gitignore */; };
+		85B50AFE32C9F101002F0081 /* cmark-gfm in Frameworks */ = {isa = PBXBuildFile; productRef = 85B50AFE32C9F101002F0083 /* cmark-gfm */; };
+		85B50AFE32C9F101002F0082 /* cmark-gfm-extensions in Frameworks */ = {isa = PBXBuildFile; productRef = 85B50AFE32C9F101002F0084 /* cmark-gfm-extensions */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +59,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				85B50AFE32C9F101002F0081 /* cmark-gfm in Frameworks */,
+				85B50AFE32C9F101002F0082 /* cmark-gfm-extensions in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +122,8 @@
 			);
 			name = freewrite;
 			packageProductDependencies = (
+				85B50AFE32C9F101002F0083 /* cmark-gfm */,
+				85B50AFE32C9F101002F0084 /* cmark-gfm-extensions */,
 			);
 			productName = freewrite;
 			productReference = 2857D4702D5F8A8000EE1012 /* Quick Note.app */;
@@ -201,6 +207,9 @@
 			);
 			mainGroup = 2857D4672D5F8A8000EE1012;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				85B50AFE32C9F101002F0085 /* XCRemoteSwiftPackageReference "swift-cmark" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2857D4712D5F8A8000EE1012 /* Products */;
 			projectDirPath = "";
@@ -608,6 +617,29 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+/* Begin XCRemoteSwiftPackageReference section */
+		85B50AFE32C9F101002F0085 /* XCRemoteSwiftPackageReference "swift-cmark" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swiftlang/swift-cmark.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.7.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		85B50AFE32C9F101002F0083 /* cmark-gfm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 85B50AFE32C9F101002F0085 /* XCRemoteSwiftPackageReference "swift-cmark" */;
+			productName = "cmark-gfm";
+		};
+		85B50AFE32C9F101002F0084 /* cmark-gfm-extensions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 85B50AFE32C9F101002F0085 /* XCRemoteSwiftPackageReference "swift-cmark" */;
+			productName = "cmark-gfm-extensions";
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2857D4682D5F8A8000EE1012 /* Project object */;
 }

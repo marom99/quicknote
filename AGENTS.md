@@ -42,7 +42,7 @@ Quick Note is a distraction-free writing environment for macOS. It also plays ex
 - AI provides feedback, questions, or analysis of stream-of-consciousness text
 
 **Hidden Power Feature - Long-Form Writing:**
-- Despite minimalist interface, supports full markdown
+- The main editor renders common Markdown while keeping the original plain-text source
 - Fixed 16px Lato body text for comfort during long sessions
 - Dark mode for night writing
 
@@ -784,7 +784,9 @@ Check `~/Documents/Quick Note/` in Finder to verify files are being created.
 2. `updateNSView` applies typography, colors, insets, and incoming text. When the incoming text differs (for example, after switching entries), it replaces the text storage while `isUpdatingText` suppresses the delegate callback, clamps the existing selection, and clears the undo manager. Clearing undo is required so an Undo action from one entry cannot modify another entry.
 3. The coordinator observes the scroll view's bounds and derives `EditorScrollMetrics` from the text layout. It publishes those metrics asynchronously to avoid mutating SwiftUI state during AppKit layout.
 
-The main editor styles Markdown in place as you type: ATX headings, emphasis, ordered and unordered list markers, quotes, inline and fenced code, and inline link labels. The syntax stays visible and editable, and links are styled without becoming clickable. `EditorMarkdown` applies display attributes to the native text storage; it never changes the characters or the plain-text binding. Normal edits restyle affected lines, with wider invalidation when a code fence changes. Styling waits for marked-text composition to finish so the input method owns its provisional text. Quick Capture remains plain.
+The main editor renders recognized Markdown in place and keeps the original UTF-8 Markdown in the existing save path. View → **Show Markdown Source** (Shift–Cmd–M) reveals the exact source for editing. `MarkdownSourceProjection` maps CommonMark and selected GitHub extensions to source ranges; TextKit hides or substitutes glyphs without replacing the text or using a web view. Raw HTML stays literal, links are not opened, and images use alt text instead of loading files or URLs. Styling waits for marked-text composition to finish so the input method owns its provisional text. Quick Capture remains plain.
+
+Typing `-` on an empty editor line starts a bullet and stores `- `. The immediately following space is optional; Return continues a list or exits an empty item. Type `\-` for a literal dash, or switch to source mode to enter Markdown without automatic list editing. Tables use inline separators rather than a grid. Source remains visible where positioning is ambiguous, such as some multiline link destinations, reference definitions attached to paragraphs, and emphasis in table cells with escaped pipes.
 
 The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeScroller` renders the separate native `NSScroller` at the editor edge, maps its knob position to a fractional `EditorScrollRequest`, and the editor coordinator applies that request to the scroll view. Keep both directions of this metrics/request pipeline intact when changing editor layout or scrolling behavior.
 
