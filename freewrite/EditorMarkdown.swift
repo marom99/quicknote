@@ -11,13 +11,30 @@ enum EditorMarkdown {
         let style: Style
     }
 
+    private static let atxOpener = try! NSRegularExpression(pattern: #"^ {0,3}#{1,6}$"#)
+    private static let atxPrefix = try! NSRegularExpression(pattern: #"^ {0,3}(#{1,6}[ \t]+)"#)
+
+    static func isATXOpener(in source: String, range: NSRange) -> Bool {
+        atxOpener.firstMatch(in: source, range: range)?.range == range
+    }
+
+    static func atxPrefix(in source: String, at location: Int) -> NSRange? {
+        let text = source as NSString
+        guard location < text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: location, length: 0))
+        guard line.location == location else { return nil }
+        return atxPrefix.firstMatch(in: source, range: line)?.range(at: 1)
+    }
+
     static func apply(to storage: NSTextStorage, attributes: [NSAttributedString.Key: Any], range: NSRange,
-                      spans: [Span], editingLines: NSRange?) {
+                      spans: [Span], editingLines: NSRange?, liveHeadingPrefix: NSRange?) {
         guard range.length > 0 else { return }
         let bodyFont = attributes[.font] as? NSFont ?? .systemFont(ofSize: 16)
         let ink = attributes[.foregroundColor] as? NSColor ?? .textColor
         let fonts = NSFontManager.shared
         var faces: [FontFace: NSFont] = [:]
+        let liveHeading = liveHeadingPrefix.map { spans.contains(Span(range: $0, style: .marker)) } == true
+            ? liveHeadingPrefix : nil
 
         storage.beginEditing()
         defer { storage.endEditing() }
@@ -27,7 +44,17 @@ enum EditorMarkdown {
             guard target.length > 0 else { continue }
             let source = editingLines.map { NSIntersectionRange($0, target) }
             let keepsBullet = span.style == .bullet && (storage.string as NSString).character(at: span.range.location) == 45
-            if let source, source.length > 0, span.style != .listMarker, !keepsBullet {
+            let keepsHeading: Bool
+            if let liveHeading, let source, source.length > 0 {
+                if case .heading = span.style {
+                    keepsHeading = span.range.location == NSMaxRange(liveHeading)
+                } else {
+                    keepsHeading = span.style == .marker && span.range == liveHeading
+                }
+            } else {
+                keepsHeading = false
+            }
+            if let source, source.length > 0, span.style != .listMarker, !keepsBullet, !keepsHeading {
                 if target.location < source.location {
                     apply(Span(range: NSRange(location: target.location, length: source.location - target.location), style: span.style))
                 }
@@ -74,7 +101,7 @@ enum EditorMarkdown {
                     } else {
                         switch span.style {
                         case .heading(let level):
-                            let size = bodyFont.pointSize + CGFloat(max(0, 4 - level)) * 2
+                            let size = bodyFont.pointSize + CGFloat([8, 6, 4, 3, 2, 1][level - 1])
                             styled = fonts.convert(fonts.convert(font, toHaveTrait: .boldFontMask), toSize: size)
                         case .bold, .tableHeader:
                             styled = fonts.convert(font, toHaveTrait: .boldFontMask)

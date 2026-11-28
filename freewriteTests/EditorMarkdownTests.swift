@@ -45,34 +45,82 @@ struct EditorMarkdownTests {
         #expect(source.value == "**Test*\n")
     }
 
-    @Test(arguments: [false, true])
-    func typedHeadingStaysSourceUntilReturnAndReappearsOnArrowUp(afterBullet: Bool) async throws {
+    @Test(arguments: Array(1...6))
+    func atxHeadingActivatesOnSpaceAndRevealsSourceOnReturnToLine(level: Int) async throws {
         let (editor, coordinator, source) = makeEditor()
         let window = attach(editor)
         defer { window.contentView = nil }
         configure(coordinator, editor, text: "", id: UUID())
-        if afterBullet {
+        if level == 2 {
             key("-", code: 27, in: window)
             #expect(source.value == "- ")
             #expect(editor.textStorage?.attribute(.markdownGlyph, at: 0, effectiveRange: nil) as? UInt16 == 0x2022)
             key("\r", code: 36, in: window)
             #expect(source.value == "")
         }
-        for character in "# Heading" {
+        let hashes = String(repeating: "#", count: level)
+        for character in hashes {
             key(String(character), in: window)
             #expect(!characterIsHidden(at: 0, in: editor))
         }
-        #expect(source.value == "# Heading")
-        #expect(try font(in: editor, at: 2).pointSize == 16)
-        key("\r", code: 36, in: window)
-        #expect(source.value == "# Heading\n")
+        #expect(source.value == hashes)
+        key(" ", code: 49, in: window)
+        #expect(source.value == hashes + " ")
+        #expect(editor.selectedRange() == NSRange(location: level + 1, length: 0))
+        for index in 0...level { #expect(characterIsHidden(at: index, in: editor)) }
+        key("H", in: window)
+        #expect(source.value == hashes + " H")
+        #expect(isBold(try font(in: editor, at: level + 1)))
+        #expect(try font(in: editor, at: level + 1).pointSize == [24, 22, 20, 19, 18, 17][level - 1])
+        for character in "eading" { key(String(character), in: window) }
+        #expect(source.value == hashes + " Heading")
         #expect(characterIsHidden(at: 0, in: editor))
-        #expect(try font(in: editor, at: 2).pointSize > 16)
+        key("\r", code: 36, in: window)
+        #expect(source.value == hashes + " Heading\n")
+        #expect(characterIsHidden(at: 0, in: editor))
         key("\u{f700}", code: 126, in: window)
         await settleSelection()
         #expect(!characterIsHidden(at: 0, in: editor))
-        #expect(try font(in: editor, at: 2).pointSize == 16)
-        #expect(source.value == "# Heading\n")
+        #expect(!isBold(try font(in: editor, at: level + 1)))
+        #expect(source.value == hashes + " Heading\n")
+    }
+
+    @Test(arguments: ["#tag ", "\\# ", "inline # ", "####### ", "    ## ", "```\n## "])
+    func nonATXKeyboardInputStaysLiteral(input: String) {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "", id: UUID())
+        for character in input {
+            key(character == "\n" ? "\r" : String(character), code: character == "\n" ? 36 : 0, in: window)
+        }
+        key("X", in: window)
+        #expect(source.value == input + "X")
+        let hash = (source.value as NSString).range(of: "#").location
+        #expect(!characterIsHidden(at: hash, in: editor))
+    }
+
+    @Test func liveHeadingSpaceAndTitleUndoWithoutLosingThePrefix() throws {
+        let (editor, coordinator, source) = makeEditor()
+        let window = attach(editor, deterministicUndo: true)
+        defer { window.contentView = nil }
+        configure(coordinator, editor, text: "Previous line\n", id: UUID())
+        editor.setSelectedRange(NSRange(location: 14, length: 0))
+        for character in "## " { key(String(character), in: window) }
+        let undo = try #require(editor.undoManager)
+        #expect(characterIsHidden(at: 14, in: editor))
+        key("H", in: window)
+        undo.undo()
+        #expect(source.value == "Previous line\n## ")
+        undo.undo()
+        #expect(source.value == "Previous line\n##")
+        #expect(!characterIsHidden(at: 14, in: editor))
+        undo.redo()
+        #expect(source.value == "Previous line\n## ")
+        #expect(characterIsHidden(at: 14, in: editor))
+        key("\u{7f}", code: 51, in: window)
+        #expect(source.value == "Previous line\n##")
+        #expect(!characterIsHidden(at: 14, in: editor))
     }
 
     @Test func lineTransitionsRevealLinkQuoteAndFenceSyntaxWithoutChangingSelection() async throws {
