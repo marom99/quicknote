@@ -271,9 +271,10 @@ struct freewriteApp: App {
     @AppStorage("colorScheme") private var colorSchemeString: String = "light"
     
     init() {
-        // Register Lato font
-        if let fontURL = Bundle.main.url(forResource: "Lato-Regular", withExtension: "ttf") {
-            CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, nil)
+        for name in ["Lato-Regular", "Lato-Bold", "Lato-Italic", "Lato-BoldItalic"] {
+            if let fontURL = Bundle.main.url(forResource: name, withExtension: "ttf") {
+                CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, nil)
+            }
         }
     }
      

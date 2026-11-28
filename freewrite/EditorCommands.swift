@@ -5,6 +5,8 @@ struct EditorCommandActions {
     var openHistory: () -> Void
     var searchNotes: () -> Void
     var openDestinationSettings: () -> Void
+    var markdownSourceShown = false
+    var toggleMarkdownSource: (() -> Void)?
 }
 
 private struct EditorCommandActionsKey: FocusedValueKey {
@@ -55,6 +57,11 @@ struct EditorCommands: Commands {
         CommandGroup(after: .sidebar) {
             commandButton("History", .openHistory)
             commandButton("Search Notes", .searchNotes)
+            Button(actions?.markdownSourceShown == true ? "Show Rendered Markdown" : "Show Markdown Source") {
+                actions?.toggleMarkdownSource?()
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+            .disabled(actions?.toggleMarkdownSource == nil)
         }
 
         CommandGroup(replacing: .appSettings) {
