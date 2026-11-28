@@ -1,75 +1,54 @@
 import AppKit
 import SwiftUI
 
-/// Keeps the editor window floating above other apps and present on every Space.
+/// Keeps the editor window floating above other apps' windows and present on every Space.
 ///
-/// Only the window's level and collection behavior change: it stays an ordinary
-/// key window, so editing, menus, sheets and shortcuts behave as they always have.
-/// A click on the floating window activates the app and lands in the editor.
+/// Only the window's level and collection behavior change: it stays an ordinary key
+/// window, so editing, menus, sheets and shortcuts behave as they always have.
 enum PinnedWindow {
-    static let defaultsKey = "windowPinned"
+    /// Key left behind by the earlier pin toggle; cleared so no stored value can imply a choice.
+    static let legacyDefaultsKey = "windowPinned"
 
-    private static let pinnedLevel: NSWindow.Level = .floating
-    private static let pinnedBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    private static let floatingLevel: NSWindow.Level = .floating
+    private static let floatingBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-    /// Window state from before the first pin, restored when pinning is turned off.
-    private final class Baseline {
-        let level: NSWindow.Level
-        let collectionBehavior: NSWindow.CollectionBehavior
-        let hidesOnDeactivate: Bool
-
-        init(_ window: NSWindow) {
-            level = window.level
-            collectionBehavior = window.collectionBehavior
-            hidesOnDeactivate = window.hidesOnDeactivate
-        }
-    }
-
-    private static var baselines = NSMapTable<NSWindow, Baseline>(keyOptions: .weakMemory, valueOptions: .strongMemory)
-    private static var pinnedWindows = NSHashTable<NSWindow>.weakObjects()
+    private static var editorWindows = NSHashTable<NSWindow>.weakObjects()
     private static var observations: [NSObjectProtocol] = []
 
-    static func isPinned(_ window: NSWindow) -> Bool {
-        pinnedWindows.contains(window)
-    }
-
-    /// Applies (or removes once) the pinned treatment for one editor window.
-    static func apply(to window: NSWindow, pinned: Bool) {
+    /// Floats one editor window. Idempotent, so every SwiftUI update can call it.
+    static func apply(to window: NSWindow) {
         // Menus, status items and panels (Quick Capture) keep their own behavior.
         guard window.contentView != nil, !(window is NSPanel) else { return }
+        clearLegacyDefaults()
         startObserving()
-        if pinned {
-            if baselines.object(forKey: window) == nil {
-                baselines.setObject(Baseline(window), forKey: window)
-            }
-            pinnedWindows.add(window)
-            applyPinned(window)
-        } else if pinnedWindows.contains(window) {
-            restore(window)
-        }
-    }
 
-    /// Re-applies the pinned level after AppKit rebuilds the window (full screen, Minimize, screen change).
-    private static func applyPinned(_ window: NSWindow) {
-        window.level = pinnedLevel
+        editorWindows.add(window)
+        window.level = floatingLevel
         window.hidesOnDeactivate = false
+
+        // A full-screen window's collection behavior belongs to AppKit until it exits.
         guard !window.styleMask.contains(.fullScreen) else { return }
         var behavior = window.collectionBehavior.subtracting(.moveToActiveSpace)
-        behavior.formUnion(pinnedBehavior)
+        behavior.formUnion(floatingBehavior)
         if behavior != window.collectionBehavior {
             window.collectionBehavior = behavior
         }
     }
 
-    private static func restore(_ window: NSWindow) {
-        defer { pinnedWindows.remove(window) }
-        guard let baseline = baselines.object(forKey: window) else { return }
-        baselines.setObject(nil, forKey: window)
-        window.level = baseline.level
-        window.hidesOnDeactivate = baseline.hidesOnDeactivate
-        // A full-screen window's collection behavior belongs to AppKit until it exits.
+    /// Re-applies the floating treatment after AppKit rebuilds the window (full screen, Minimize, screen change).
+    private static func reapply(_ window: NSWindow) {
+        guard editorWindows.contains(window) else { return }
+        window.level = floatingLevel
         guard !window.styleMask.contains(.fullScreen) else { return }
-        window.collectionBehavior = baseline.collectionBehavior
+        var behavior = window.collectionBehavior.subtracting(.moveToActiveSpace)
+        behavior.formUnion(floatingBehavior)
+        if behavior != window.collectionBehavior {
+            window.collectionBehavior = behavior
+        }
+    }
+
+    private static func clearLegacyDefaults() {
+        UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
     }
 
     private static func startObserving() {
@@ -82,11 +61,10 @@ enum PinnedWindow {
         for name in names {
             let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { notification in
                 if let window = notification.object as? NSWindow {
-                    guard pinnedWindows.contains(window) else { return }
-                    applyPinned(window)
+                    reapply(window)
                 } else {
-                    for window in pinnedWindows.allObjects {
-                        applyPinned(window)
+                    for window in editorWindows.allObjects {
+                        reapply(window)
                     }
                 }
             }
@@ -95,32 +73,22 @@ enum PinnedWindow {
     }
 }
 
-/// Pushes the pinned preference into the window that hosts the editor.
+/// Pushes the floating window treatment into the window that hosts the editor.
 struct PinnedWindowAccessor: NSViewRepresentable {
-    let pinned: Bool
-
     final class HostView: NSView {
-        var pinned = false
-
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            apply()
-        }
-
-        func apply() {
             guard let window else { return }
-            PinnedWindow.apply(to: window, pinned: pinned)
+            PinnedWindow.apply(to: window)
         }
     }
 
     func makeNSView(context: Context) -> HostView {
-        let view = HostView()
-        view.pinned = pinned
-        return view
+        HostView()
     }
 
     func updateNSView(_ nsView: HostView, context: Context) {
-        nsView.pinned = pinned
-        nsView.apply()
+        guard let window = nsView.window else { return }
+        PinnedWindow.apply(to: window)
     }
 }

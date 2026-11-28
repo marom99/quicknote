@@ -16,11 +16,10 @@ struct PinnedWindowTests {
         return window
     }
 
-    @Test func pinningFloatsTheWindowAboveOtherAppsOnEverySpace() {
+    @Test func editorWindowFloatsAboveOtherAppsOnEverySpace() {
         let window = makeEditorWindow()
-        let before = window.collectionBehavior
 
-        PinnedWindow.apply(to: window, pinned: true)
+        PinnedWindow.apply(to: window)
 
         #expect(window.level == .floating)
         #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
@@ -28,50 +27,22 @@ struct PinnedWindowTests {
         #expect(window.collectionBehavior.contains(.fullScreenPrimary))
         #expect(!window.collectionBehavior.contains(.moveToActiveSpace))
         #expect(!window.hidesOnDeactivate)
-        #expect(PinnedWindow.isPinned(window))
-        #expect(window.collectionBehavior != before)
     }
 
-    @Test func unpinningRestoresTheOriginalWindowState() {
+    @Test func applyingTwiceKeepsTheSameFloatingState() {
         let window = makeEditorWindow()
-        let originalLevel = window.level
-        let originalBehavior = window.collectionBehavior
 
-        PinnedWindow.apply(to: window, pinned: true)
-        PinnedWindow.apply(to: window, pinned: false)
+        PinnedWindow.apply(to: window)
+        let behavior = window.collectionBehavior
+        PinnedWindow.apply(to: window)
 
-        #expect(window.level == originalLevel)
-        #expect(window.collectionBehavior == originalBehavior)
-        #expect(!PinnedWindow.isPinned(window))
-    }
-
-    @Test func pinningTwiceStillRestoresTheStateFromBeforeTheFirstPin() {
-        let window = makeEditorWindow()
-        let originalLevel = window.level
-        let originalBehavior = window.collectionBehavior
-
-        PinnedWindow.apply(to: window, pinned: true)
-        PinnedWindow.apply(to: window, pinned: true)
-        PinnedWindow.apply(to: window, pinned: false)
-
-        #expect(window.level == originalLevel)
-        #expect(window.collectionBehavior == originalBehavior)
-    }
-
-    @Test func unpinningAWindowThatWasNeverPinnedLeavesItAlone() {
-        let window = makeEditorWindow()
-        let originalBehavior = window.collectionBehavior
-
-        PinnedWindow.apply(to: window, pinned: false)
-
-        #expect(window.level == .normal)
-        #expect(window.collectionBehavior == originalBehavior)
-        #expect(!PinnedWindow.isPinned(window))
+        #expect(window.level == .floating)
+        #expect(window.collectionBehavior == behavior)
     }
 
     @Test func appKitResettingTheLevelIsUndoneByTheNextWindowEvent() {
         let window = makeEditorWindow()
-        PinnedWindow.apply(to: window, pinned: true)
+        PinnedWindow.apply(to: window)
 
         // Full screen exit / deminiaturize rebuild the window and drop our level.
         window.level = .normal
@@ -80,36 +51,49 @@ struct PinnedWindowTests {
 
         #expect(window.level == .floating)
         #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
-
-        PinnedWindow.apply(to: window, pinned: false)
     }
 
     @Test func floatingWindowReappliesAfterAnyScreenParameterChange() {
         let window = makeEditorWindow()
-        PinnedWindow.apply(to: window, pinned: true)
+        PinnedWindow.apply(to: window)
 
         window.level = .normal
         NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
         #expect(window.level == .floating)
-
-        PinnedWindow.apply(to: window, pinned: false)
     }
 
-    @Test func quickCapturePanelIsNotPinned() {
+    @Test func applyingNeverOrdersTheWindowFrontOrUnminimizesIt() {
+        let window = makeEditorWindow()
+
+        PinnedWindow.apply(to: window)
+
+        #expect(!window.isVisible)
+        #expect(!window.isMiniaturized)
+        #expect(window.level == .floating)
+    }
+
+    @Test func quickCapturePanelIsLeftAlone() {
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 290),
             styleMask: [.titled, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating
         let originalBehavior = panel.collectionBehavior
 
-        PinnedWindow.apply(to: panel, pinned: true)
+        PinnedWindow.apply(to: panel)
 
-        #expect(!PinnedWindow.isPinned(panel))
         #expect(panel.collectionBehavior == originalBehavior)
+    }
+
+    @Test func legacyToggleSettingIsCleared() {
+        UserDefaults.standard.set(false, forKey: PinnedWindow.legacyDefaultsKey)
+        let window = makeEditorWindow()
+
+        PinnedWindow.apply(to: window)
+
+        #expect(UserDefaults.standard.object(forKey: PinnedWindow.legacyDefaultsKey) == nil)
     }
 
     @Test func firstClickIntoAnInactiveEditorPlacesTheCaret() throws {
