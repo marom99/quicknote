@@ -51,6 +51,22 @@ struct EditorScrollRequest: Equatable {
 }
 
 final class FreewriteEditorTextView: NSTextView {
+    var onMarkedTextChange: (() -> Void)?
+    private(set) var isSettingMarkedText = false
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        isSettingMarkedText = true
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        isSettingMarkedText = false
+        onMarkedTextChange?()
+    }
+
+    override func unmarkText() {
+        let wasMarked = hasMarkedText()
+        super.unmarkText()
+        if wasMarked { onMarkedTextChange?() }
+    }
+
     var allowsAutomaticFocus = true {
         didSet {
             if allowsAutomaticFocus && !oldValue {
@@ -171,6 +187,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     static let bodyFontSize: CGFloat = 16
 
     @Binding var text: String
+    @Binding var isComposingText: Bool
     @Binding var scrollRequest: EditorScrollRequest?
     var selectionFocusRequest: UUID?
 
@@ -187,7 +204,7 @@ struct FreewriteTextEditor: NSViewRepresentable {
     let onScrollMetricsChange: (EditorScrollMetrics) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onScrollMetricsChange: onScrollMetricsChange)
+        Coordinator(text: $text, isComposingText: $isComposingText, onScrollMetricsChange: onScrollMetricsChange)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -305,11 +322,24 @@ struct FreewriteTextEditor: NSViewRepresentable {
         coordinator.stopObservingBoundsChanges()
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         @Binding private var text: String
+        @Binding private var isComposingText: Bool
         private let onScrollMetricsChange: (EditorScrollMetrics) -> Void
         private var boundsObserver: NSObjectProtocol?
         private var isUpdatingText = false
+        private var appearance: EditorAppearance?
+        private var attributes: [NSAttributedString.Key: Any] = [:]
+        private var isWaitingForComposition = false
+        private var styledSource = ""
+        private var pendingEdit: EditorMarkdown.Edit?
+        private var hasMultiplePendingEdits = false
+
+        private struct EditorAppearance: Equatable {
+            let fontName: String
+            let lineSpacing: CGFloat
+            let colorScheme: ColorScheme
+        }
 
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
@@ -319,8 +349,9 @@ struct FreewriteTextEditor: NSViewRepresentable {
         var lastFocusRequest: UUID?
         var lastAppliedCaretEndRequest: UUID?
 
-        init(text: Binding<String>, onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
+        init(text: Binding<String>, isComposingText: Binding<Bool> = .constant(false), onScrollMetricsChange: @escaping (EditorScrollMetrics) -> Void) {
             _text = text
+            _isComposingText = isComposingText
             self.onScrollMetricsChange = onScrollMetricsChange
         }
 
@@ -333,38 +364,45 @@ struct FreewriteTextEditor: NSViewRepresentable {
             colorScheme: ColorScheme
         ) {
             let editorChanged = lastConfiguredEditorID != editorID
-            let fontSize = FreewriteTextEditor.bodyFontSize
-            let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
-            let textColor = colorScheme == .light
-                ? NSColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1.0)
-                : NSColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0)
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.lineSpacing = max(lineSpacing, 0)
+            if let editor = textView as? FreewriteEditorTextView, editor.onMarkedTextChange == nil {
+                editor.onMarkedTextChange = { [weak self] in self?.finishCompositionSoon() }
+            }
+            if appearance == nil { textView.textStorage?.delegate = self }
+            if !editorChanged, isComposing(in: textView) || isWaitingForComposition { return }
 
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: textColor,
-                .paragraphStyle: paragraphStyle,
-            ]
-
-            textView.typingAttributes = attributes
-            textView.defaultParagraphStyle = paragraphStyle
-            textView.insertionPointColor = textColor
-
-            let shouldReplaceText = editorChanged || textView.string != text
-            guard shouldReplaceText else {
-                textView.textColor = textColor
-                textView.font = font
-                return
+            let nextAppearance = EditorAppearance(fontName: selectedFont, lineSpacing: lineSpacing, colorScheme: colorScheme)
+            let appearanceChanged = appearance != nextAppearance
+            if appearanceChanged {
+                appearance = nextAppearance
+                let fontSize = FreewriteTextEditor.bodyFontSize
+                let font = NSFont(name: selectedFont, size: fontSize) ?? .systemFont(ofSize: fontSize)
+                let shade: CGFloat = colorScheme == .light ? 0.20 : 0.90
+                let textColor = NSColor(red: shade, green: shade, blue: shade, alpha: 1)
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.lineSpacing = max(lineSpacing, 0)
+                attributes = [.font: font, .foregroundColor: textColor, .paragraphStyle: paragraphStyle]
+                textView.defaultParagraphStyle = paragraphStyle
+                textView.insertionPointColor = textColor
             }
 
-            let selectedRanges = clampedSelectedRanges(textView.selectedRanges, maxLength: (text as NSString).length)
-            isUpdatingText = true
-            textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
-            textView.undoManager?.removeAllActions()
-            textView.selectedRanges = selectedRanges
-            isUpdatingText = false
-            lastConfiguredEditorID = editorID
+            if editorChanged || textView.string != text {
+                isWaitingForComposition = false
+                isUpdatingText = true
+                if textView.hasMarkedText() {
+                    textView.inputContext?.discardMarkedText()
+                    if textView.hasMarkedText() { textView.unmarkText() }
+                }
+                let selectedRanges = clampedSelectedRanges(textView.selectedRanges, maxLength: (text as NSString).length)
+                textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
+                textView.undoManager?.removeAllActions()
+                textView.selectedRanges = selectedRanges
+                restyle(textView, force: true)
+                isUpdatingText = false
+                lastConfiguredEditorID = editorID
+                if isComposingText { finishCompositionSoon() }
+            } else if appearanceChanged {
+                restyle(textView, force: true)
+            }
         }
 
         @discardableResult
@@ -400,8 +438,55 @@ struct FreewriteTextEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !isUpdatingText, let textView else { return }
+            if isComposing(in: textView) || isWaitingForComposition {
+                finishCompositionSoon()
+                return
+            }
+            restyle(textView)
             text = textView.string
             publishScrollMetrics()
+        }
+
+        func textStorage(_ textStorage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
+            guard !isUpdatingText, editedMask.contains(.editedCharacters) else { return }
+            if pendingEdit != nil { hasMultiplePendingEdits = true }
+            pendingEdit = EditorMarkdown.Edit(range: editedRange, changeInLength: delta)
+        }
+
+        private func isComposing(in textView: NSTextView) -> Bool {
+            textView.hasMarkedText() || (textView as? FreewriteEditorTextView)?.isSettingMarkedText == true
+        }
+
+        private func finishCompositionSoon() {
+            guard !isUpdatingText, !isWaitingForComposition else { return }
+            isWaitingForComposition = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, isWaitingForComposition else { return }
+                isWaitingForComposition = false
+                guard let textView else { return }
+                let composing = isComposing(in: textView)
+                if isComposingText != composing { isComposingText = composing }
+                guard !composing else { return }
+                restyle(textView)
+                if text != textView.string { text = textView.string }
+                publishScrollMetrics()
+            }
+        }
+
+        private func restyle(_ textView: NSTextView, force: Bool = false) {
+            guard let storage = textView.textStorage else { return }
+            let source = storage.string
+            let range: NSRange
+            if !force, !hasMultiplePendingEdits, let pendingEdit {
+                range = EditorMarkdown.invalidatedRange(in: source, replacing: styledSource, edit: pendingEdit)
+            } else {
+                range = NSRange(location: 0, length: storage.length)
+            }
+            EditorMarkdown.apply(to: storage, attributes: attributes, range: range)
+            styledSource = source
+            pendingEdit = nil
+            hasMultiplePendingEdits = false
+            textView.typingAttributes = attributes
         }
 
         func scrollTo(fraction: CGFloat) {
@@ -508,6 +593,7 @@ struct ContentView: View {
     @StateObject private var destinationStore = DestinationStore()
     @State private var entries: [HumanEntry] = []
     @State private var text: String = ""  // Remove initial welcome text since we'll handle it in createNewEntry
+    @State private var isComposingEditorText = false
     
     private let selectedFont: String = "Lato-Regular"
     @State private var bottomNavOpacity: Double = 1.0
@@ -1585,6 +1671,7 @@ struct ContentView: View {
                     // Show text editor for text entries
                     FreewriteTextEditor(
                         text: $text,
+                        isComposingText: $isComposingEditorText,
                         scrollRequest: $editorScrollRequest,
                         selectionFocusRequest: historySelectionFocusRequest,
                         editorID: selectedEntryId,
@@ -1606,7 +1693,7 @@ struct ContentView: View {
                     .background(Color(colorScheme == .light ? .white : .black))
                         // Placeholder shares the editor's coordinate space so it sits on the first line.
                         .overlay(alignment: .topLeading) {
-                            if text.isEmpty {
+                            if text.isEmpty && !isComposingEditorText {
                                 Text(placeholderText)
                                     .font(.custom(selectedFont, fixedSize: FreewriteTextEditor.bodyFontSize))
                                     .foregroundColor(colorScheme == .light ? .gray.opacity(0.5) : .gray.opacity(0.6))
@@ -1623,6 +1710,7 @@ struct ContentView: View {
                         .onAppear {
                             placeholderText = placeholderOptions.randomElement() ?? "Begin writing"
                         }
+                        .onDisappear { isComposingEditorText = false }
 
                     NativeEditorEdgeScroller(
                         metrics: editorScrollMetrics,

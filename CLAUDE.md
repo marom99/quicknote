@@ -784,6 +784,8 @@ Check `~/Documents/Quick Note/` in Finder to verify files are being created.
 2. `updateNSView` applies typography, colors, insets, and incoming text. When the incoming text differs (for example, after switching entries), it replaces the text storage while `isUpdatingText` suppresses the delegate callback, clamps the existing selection, and clears the undo manager. Clearing undo is required so an Undo action from one entry cannot modify another entry.
 3. The coordinator observes the scroll view's bounds and derives `EditorScrollMetrics` from the text layout. It publishes those metrics asynchronously to avoid mutating SwiftUI state during AppKit layout.
 
+The main editor styles Markdown in place as you type: ATX headings, emphasis, ordered and unordered list markers, quotes, inline and fenced code, and inline link labels. The syntax stays visible and editable, and links are styled without becoming clickable. `EditorMarkdown` applies display attributes to the native text storage; it never changes the characters or the plain-text binding. Normal edits restyle affected lines, with wider invalidation when a code fence changes. Styling waits for marked-text composition to finish so the input method owns its provisional text. Quick Capture remains plain.
+
 The scroll view's built-in vertical scroller remains hidden. `NativeEditorEdgeScroller` renders the separate native `NSScroller` at the editor edge, maps its knob position to a fractional `EditorScrollRequest`, and the editor coordinator applies that request to the scroll view. Keep both directions of this metrics/request pipeline intact when changing editor layout or scrolling behavior.
 
 ## Key SwiftUI Patterns Used
