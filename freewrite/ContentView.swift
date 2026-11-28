@@ -2894,14 +2894,12 @@ struct ContentView: View {
                 }
             }
         } label: {
-            Text(activeDestinationDisplayName)
-                .font(.system(size: 13))
-                .lineLimit(1)
+            DestinationMenuLabel(name: activeDestinationDisplayName)
         }
         .menuStyle(.borderlessButton)
         .opacity(isHoveringDestinationChip ? 1 : (colorScheme == .light ? 0.5 : 0.45))
         .nativeTooltip("Switch or manage save destinations")
-        .fixedSize(horizontal: false, vertical: true)
+        .fixedSize(horizontal: true, vertical: true)
         .layoutPriority(-1)
         .onHover { hovering in
             isHoveringDestinationChip = hovering
@@ -3301,6 +3299,34 @@ extension NSView {
             }
         }
         return nil
+    }
+}
+
+struct DestinationMenuLabel: View {
+    let name: String
+
+    /// The destination menu hugs its name, so a long name has to be shortened by hand;
+    /// letting the label take its full width would squeeze the nav's right-hand controls.
+    static let maxNameWidth: CGFloat = 150
+    static let fontSize: CGFloat = 13
+
+    var body: some View {
+        Text(Self.shortened(name, toFit: Self.maxNameWidth))
+            .font(.system(size: Self.fontSize))
+            .lineLimit(1)
+    }
+
+    static func shortened(_ name: String, toFit maxWidth: CGFloat) -> String {
+        guard width(of: name) > maxWidth else { return name }
+        var shortened = name
+        while !shortened.isEmpty, width(of: shortened + "…") > maxWidth {
+            shortened.removeLast()
+        }
+        return shortened.trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    private static func width(of text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: fontSize)]).width
     }
 }
 
