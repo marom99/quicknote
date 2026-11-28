@@ -189,6 +189,8 @@ struct TaskCheckboxTests {
     private func render(_ editor: NSView) throws -> NSBitmapImageRep {
         let scale: CGFloat = 2
         let size = editor.bounds.size
+        let pdf = try #require(editor.dataWithPDF(inside: editor.bounds) as Data?)
+        let page = try #require(NSImage(data: pdf))
         let rep = try #require(NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: Int(size.width * scale),
@@ -205,7 +207,7 @@ struct TaskCheckboxTests {
         let context = try #require(NSGraphicsContext(bitmapImageRep: rep))
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        editor.draw(editor.bounds)
+        page.draw(in: NSRect(origin: .zero, size: size))
         NSGraphicsContext.restoreGraphicsState()
         return rep
     }
@@ -246,7 +248,8 @@ struct TaskCheckboxTests {
     }
 
     private func isInk(_ color: NSColor, scheme: ColorScheme) -> Bool {
-        scheme == .light ? color.brightnessComponent < 0.85 : color.brightnessComponent > 0.15
+        guard color.alphaComponent > 0.5 else { return false }
+        return scheme == .light ? color.brightnessComponent < 0.85 : color.brightnessComponent > 0.15
     }
 
     private func hasAccentTint(in rep: NSBitmapImageRep, inside rect: NSRect) -> Bool {
@@ -263,6 +266,7 @@ struct TaskCheckboxTests {
     private func makeEditor() -> (FreewriteEditorTextView, FreewriteTextEditor.Coordinator, Source) {
         let source = Source()
         let editor = FreewriteEditorTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        editor.drawsBackground = false
         editor.isRichText = false
         editor.allowsUndo = true
         let coordinator = FreewriteTextEditor.Coordinator(

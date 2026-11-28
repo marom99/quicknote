@@ -468,19 +468,17 @@ final class FreewriteEditorTextView: NSTextView, NSLayoutManagerDelegate {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if !showsMarkdownSource, let storage = textStorage {
-            for box in taskBoxes(in: dirtyRect) {
-                let checked = storage.attribute(.markdownTask, at: box.characterIndex, effectiveRange: nil) as? Bool ?? false
-                let ink = storage.attribute(.foregroundColor, at: box.characterIndex, effectiveRange: nil) as? NSColor
-                    ?? .textColor
-                drawTaskBox(box.rect,
-                            checked: checked,
-                            hovered: hoveredTaskCharacter == box.characterIndex,
-                            pressed: pressedTaskCharacter == box.characterIndex,
-                            ink: ink)
-            }
-        }
         super.draw(dirtyRect)
+        guard !showsMarkdownSource, let storage = textStorage else { return }
+        for box in taskBoxes(in: dirtyRect) {
+            let checked = storage.attribute(.markdownTask, at: box.characterIndex, effectiveRange: nil) as? Bool ?? false
+            let ink = storage.attribute(.foregroundColor, at: box.characterIndex, effectiveRange: nil) as? NSColor ?? .textColor
+            drawTaskBox(box.rect,
+                        checked: checked,
+                        hovered: hoveredTaskCharacter == box.characterIndex,
+                        pressed: pressedTaskCharacter == box.characterIndex,
+                        ink: ink)
+        }
     }
 
     private func drawTaskBox(_ rect: NSRect, checked: Bool, hovered: Bool, pressed: Bool, ink: NSColor) {
